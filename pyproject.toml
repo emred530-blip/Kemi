@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kemi"
+version = "0.1.0"
+description = "Kemi: BitTorrent-benzeri P2P islem gucu paylasim agi (peer-to-peer compute sharing network)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Kemi Project" }]
+keywords = ["p2p", "distributed-computing", "compute-sharing", "ai-inference"]
+
+[project.scripts]
+kemi = "kemi.cli:main"
+
+[project.optional-dependencies]
+ai = ["transformers", "torch"]
+
+[tool.setuptools.packages.find]
+include = ["kemi*"]
