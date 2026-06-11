@@ -1,108 +1,122 @@
-# Kemi — P2P İşlem Gücü Paylaşım Ağı
+# Kemi — Merkeziyetsiz P2P İşlem Gücü Paylaşım Ağı
 
-Kemi, **BitTorrent'in dosya paylaşımına yaptığını işlem gücüne yapan** eşler arası (P2P) bir ağdır. Kullanıcılar boştaki CPU/GPU kapasitelerini **kredi karşılığında kiraya verir**; yapay zekâ çıkarımı (inference) veya başka ağır hesaplamalar yapmak isteyenler bu kredilerle **sürünün (swarm) işlem gücünü kiralar**. Amaç, merkezi veri merkezlerine olan bağımlılığı azaltmaktır.
+Kemi, **BitTorrent'in dosya paylaşımına yaptığını işlem gücüne yapan**, tamamen merkeziyetsiz bir eşler arası (P2P) ağdır. Kullanıcılar boştaki CPU/GPU kapasitelerini **kredi karşılığında kiraya verir**; yapay zekâ çıkarımı (inference) veya başka ağır hesaplamalar yapmak isteyenler bu kredilerle **sürünün (swarm) işlem gücünü kiralar**. Amaç, merkezi veri merkezlerine olan bağımlılığı azaltmaktır.
+
+**v0.2 itibarıyla ağda hiçbir merkezi bileşen yoktur** — tracker yok, defter sunucusu yok, özel rol yok. Her katılımcı aynı `kemi node`'u çalıştırır.
 
 ```
-                        ┌──────────────┐
-                        │   TRACKER    │   eş keşfi + kredi defteri
-                        │  (keşif+defter)│  (görev verisi buradan GEÇMEZ)
-                        └──────┬───────┘
-              kayıt/heartbeat  │  escrow oluştur/çöz
-        ┌──────────────┬──────┴───────┬──────────────┐
-        │              │              │              │
-  ┌─────┴─────┐  ┌─────┴─────┐  ┌─────┴─────┐  ┌─────┴─────┐
-  │ PROVIDER 1 │  │ PROVIDER 2 │  │ PROVIDER 3 │  │ CONSUMER  │
-  │ 0.5 kr/iş  │  │ 1.0 kr/iş  │  │ 1.5 kr/iş  │  │ (istemci) │
-  └─────▲─────┘  └─────▲─────┘  └─────▲─────┘  └─────┬─────┘
-        │              │              │              │
-        └──────────────┴──────────────┴──────────────┘
-              parçalar (chunk) doğrudan eşler arasında akar
+              ╭────────────────  KEŞİF: Kademlia DHT (UDP)  ────────────────╮
+              │   sağlayıcı kayıtları görev-anahtarlarının XOR-en-yakın     │
+              │   K düğümünde tutulur; imzalı ve kısa ömürlüdür             │
+              ╰─────────────────────────────────────────────────────────────╯
+   ┌──────────┐      ┌──────────┐      ┌──────────┐      ┌──────────┐
+   │  EŞ  A   │◄────►│  EŞ  B   │◄────►│  EŞ  C   │◄────►│  EŞ  D   │
+   │ sağlayıcı│      │ tüketici │      │ sıradan  │      │ sağlayıcı│
+   │ 0.5 cr/iş│      │          │      │ eş+relay │◄═════│ (NAT     │
+   └────▲─────┘      └────┬─────┘      └──────────┘ kalıcı│ arkasında│
+        │   parçalar +    │                        bağlantı└──────────┘
+        ╰── imzalı ödeme ─╯
+              ╭─────────────────────────────────────────────────────────────╮
+              │  DEFTER: imzalı transferlerin dedikodu (gossip) ile         │
+              │  çoğaltılan CRDT kümesi — her eşte tam bir replika          │
+              ╰─────────────────────────────────────────────────────────────╯
 ```
 
-## Nasıl çalışır?
+## Merkeziyetsizlik nasıl sağlanıyor?
 
-1. **Tracker** (BitTorrent tracker'ı gibi) sürünün buluşma noktasıdır: sağlayıcılar kendini kaydeder ve heartbeat atar, tüketiciler aktif sağlayıcı listesini çeker. Tracker ayrıca **kredi defterini** tutar — görev verisi ve sonuçlar tracker'dan *geçmez*, doğrudan eşler arasında akar.
-2. **Sağlayıcı** (`kemi provide`) makinesinin kaynaklarını (CPU, RAM), birim fiyatını ve desteklediği görev türlerini ilan eder; gelen parçaları çalıştırıp kredi kazanır.
-3. **Tüketici** (`kemi run`) işini parçalara böler (BitTorrent'teki "piece" mantığı), parçaları tüm uygun sağlayıcılara eşzamanlı dağıtır, başarısız parçaları başka sağlayıcılarda yeniden dener ve sonuçları sırayla birleştirir.
-4. **Ödeme escrow ile yapılır:** Tüketici işe başlamadan krediyi tracker'da kilitler ve sağlayıcılara bir *redeem anahtarı* verir. Sağlayıcı her tamamladığı parçanın ücretini bu anahtarla escrow'dan tahsil eder; iş bitince harcanmayan kısım tüketiciye iade edilir. Taraflar birbirine güvenmek zorunda kalmaz.
-5. **Sonuç doğrulama (artıklık):** `--redundancy 2+` ile her parça birbirinden bağımsız *farklı* sağlayıcılarda çalıştırılır ve sonuç parmak izleri karşılaştırılır. Uyuşmazlıkta ek bir sağlayıcı hakemlik yapar; **çoğunluk kazanır**. Hatalı veya hileli düğümler böylece etkisiz kalır.
-6. **Yeni hesaplara musluk (faucet):** Her yeni düğüm 100 krediyle başlar; kredi kazanmanın yolu işlem gücü paylaşmaktır (BitTorrent'in tit-for-tat ruhu).
+| Sorun | Çözüm |
+|---|---|
+| **Eş keşfi** | Kademlia DHT (BitTorrent'in trackersız modu, BEP 5 ile aynı yaklaşım). Sağlayıcılar imzalı kayıtlarını görev başına türetilen anahtarların altında, XOR-en-yakın K düğümde yayımlar; kayıtlar TTL ile kendiliğinden eskir. Ağa katılmak için herhangi bir çalışan eş yeterlidir. |
+| **Kimlik** | Ed25519 anahtar çifti. `node_id = sha256(pubkey ‖ nonce)` ve baştan N biti sıfır olmak zorunda: kimlik basmak **proof-of-work** gerektirir, bu da Sybil saldırılarını ve bedava-kredi (faucet) istismarını pahalılaştırır. PyNaCl varsa libsodium, yoksa saf-Python RFC 8032 kullanılır. |
+| **Ödeme** | Escrow/tracker yerine **parça başına Ed25519-imzalı kredi transferi** doğrudan sağlayıcıya verilir. Defter, imzalı işlemlerin *büyüme-tek-yönlü kümesidir* (CRDT): dedikoduyla çoğalır, varış sırasından bağımsız olarak her replika aynı duruma yakınsar. |
+| **Çift harcama** | Her gönderici işlemlerini artan `seq` ile numaralandırır. Aynı `(gönderici, seq)` ile iki farklı işlem = matematiksel kanıt: ikisi de delil olarak saklanır, deterministik olan teki sayılır ve hesap **kalıcı olarak işaretlenir**; dürüst düğümler hizmet vermeyi keser. |
+| **Sahte sonuç** | `--redundancy 2+`: her parça birbirinden bağımsız farklı sağlayıcılarda çalışır, sonuç parmak izleri karşılaştırılır, **çoğunluk kazanır**. Kaybedenler yerel itibar cezası yer. |
+| **İtibar** | Her düğüm yalnızca *birinci elden* deneyimden beslenen yerel (öznel) puan tutar — paylaşılan itibar kolay zehirlenir, birinci el deneyim zehirlenemez. Çift harcama kanıtı ise nesneldir ve işlemlerle birlikte kendisi yayılır. |
+| **NAT geçişi** | Her yanıt, isteği yapanın *gözlemlenen* dış adresini geri söyler (STUN'a gerek kalmaz). NAT arkasındaki sağlayıcı, herhangi bir erişilebilir eşe kalıcı bağlantı açar ve görev trafiği oradan **relay** edilir (TURN benzeri). |
+| **Yalıtım** | Görevler izin listelidir (ağdan asla rastgele kod çalıştırılmaz) ve buna ek olarak her parça, CPU-saniye / bellek / dosya tanıtıcısı sınırlı (`rlimit`) ayrı bir süreçte çalışır. |
+| **GPU** | `nvidia-smi` ile GPU keşfi yapılır ve kaynak ilanında yayımlanır; `transformers` backend'i GPU'da koşabilir. |
+
+### Güven modeli (dürüst özet)
+
+Ödeme parça istekleriyle birlikte gittiği için kötü niyetli bir sağlayıcının çalabileceği tutar **bir parçanın fiyatıyla sınırlıdır** — BitTorrent'in küçük parçalarla riski sınırlaması gibi. Defter anlık kesinlik (finality) yerine **nihai tutarlılık** sunar: hile dedikodu yayılınca kesin olarak yakalanır ve hesap yakılır. İtibar + PoW kimlik maliyeti, tekrarlanan saldırıyı ekonomik olarak anlamsızlaştırır. (Yol haritası: pay-ağırlıklı çekirdek imzalarıyla sert kesinlik.)
 
 ## Hızlı başlangıç
 
-Hiçbir bağımlılık gerekmez (yalnızca Python ≥ 3.10 standart kütüphanesi):
+Zorunlu bağımlılık yok (Python ≥ 3.10 standart kütüphanesi yeter; `pynacl` önerilir):
 
 ```bash
-pip install -e .          # veya doğrudan: python3 -m kemi ...
+pip install -e .            # hızlı imza için: pip install -e ".[crypto]"
 
-# Tek komutla yerel uçtan uca gösterim (tracker + 3 sağlayıcı + 2 iş):
-kemi demo
+kemi demo                   # tek komutla yerel merkeziyetsiz sürü gösterimi
 ```
+
+Demo tek süreçte şunları kurar ve kanıtlar: bootstrap eşi, farklı fiyatlı dürüst sağlayıcılar, **NAT arkasında relay'le çalışan** bir sağlayıcı, **hileli** bir sağlayıcı ve bir tüketici. Hileli çoğunluk oylamasıyla elenir + yasaklanır ve iş bitince **bütün replikaların aynı bakiyelere yakınsadığı** gösterilir.
 
 ### Gerçek bir sürü kurmak
 
 ```bash
-# 1. Bir makinede tracker'ı başlat
-kemi tracker --port 7700
+# 1. İlk eşi başlat (hiçbir özel rolü yok; sadece ilk olan o)
+kemi node --port 7700
 
-# 2. İşlem gücünü paylaşacak her makinede
-kemi provide --tracker tracker-adresi:7700 --price 0.5 \
-             --advertise-host BU_MAKINENIN_IP_ADRESI
+# 2. İşlem gücü paylaşacak her makinede
+kemi node --provide --peer ILK_ESIN_IP:7700 --price 0.5
+#    NAT arkasındaysanız: --force-relay  (otomatik tespit de denenir)
 
 # 3. Sürüyü görüntüle
-kemi providers --tracker tracker-adresi:7700
+kemi providers --peer ILK_ESIN_IP:7700
 
-# 4. İş gönder: 1000 girdilik hash işini 4'lük parçalara böl,
-#    her parçayı 2 farklı sağlayıcıda doğrulat
-echo '["a","b","c","d"]' | kemi run --tracker tracker-adresi:7700 \
+# 4. İş gönder: parçalara böl, 2 farklı sağlayıcıda çapraz doğrula
+echo '["a","b","c","d"]' | kemi run --peer ILK_ESIN_IP:7700 \
     --task hash.sha256 --input - --chunk-size 2 --redundancy 2
 
-# 5. Bakiyeni gör
-kemi balance --tracker tracker-adresi:7700
+# 5. Bakiye ve kimlik
+kemi balance --peer ILK_ESIN_IP:7700
+kemi id
 ```
 
 ### Yapay zekâ çıkarımı
 
-`ai.generate` görevi takılabilir backend'lerle çalışır:
-
 ```bash
 # Bağımlılıksız deterministik mock backend (varsayılan):
-kemi provide --tracker ... --ai-backend mock
+kemi node --provide --peer ... --ai-backend mock
 
-# Gerçek yerel model (Hugging Face) ile:
+# Gerçek yerel model (Hugging Face; GPU varsa keşfedilir):
 pip install "kemi[ai]"
-kemi provide --tracker ... --ai-backend transformers
+kemi node --provide --peer ... --ai-backend transformers
 ```
 
 ```bash
 echo '["P2P ağlar neden önemli?"]' | \
-    kemi run --tracker ... --task ai.generate --input - --params '{"max_tokens": 64}'
+    kemi run --peer ... --task ai.generate --input - --params '{"max_tokens": 64}'
 ```
 
 ## Yerleşik görev türleri
 
-| Görev | Açıklama |
-|---|---|
-| `ai.generate` | Metin üretimi — istemler (prompt) sürüye dağıtılır |
-| `hash.sha256` | Çok turlu SHA-256 (ispat-of-work benzeri yükler) |
-| `math.matmul` | Saf Python matris çarpımı (CPU karşılaştırma/benchmark) |
-| `text.wordcount` | Kelime/karakter/satır sayımı (map-reduce örneği) |
+| Görev | Açıklama | Sandbox |
+|---|---|---|
+| `ai.generate` | Metin üretimi — istemler sürüye dağıtılır | süreç-içi (model belleği) |
+| `hash.sha256` | Çok turlu SHA-256 | ✓ |
+| `math.matmul` | Saf Python matris çarpımı (benchmark) | ✓ |
+| `text.wordcount` | Kelime/karakter/satır sayımı | ✓ |
 
-**Güvenlik modeli:** Sağlayıcılar ağdan gelen rastgele kodu **asla** çalıştırmaz; yalnızca isimle çağrılan, izin listesindeki görevler çalışır. Yeni yetenekler `kemi/tasks.py` içine görev kaydederek eklenir.
+Yeni yetenekler `kemi/tasks.py` içine görev kaydederek eklenir; güvenlik sınırı her zaman isim-bazlı izin listesidir.
 
 ## Mimari
 
 | Modül | Sorumluluk |
 |---|---|
-| `kemi/protocol.py` | Tel protokolü: TCP üzerinde uzunluk önekli JSON mesajlar |
-| `kemi/identity.py` | Düğüm kimliği (`node_id = sha256(gizli_token)`) |
-| `kemi/tracker.py` | Eş keşfi + kredi defteri sunucusu |
-| `kemi/ledger.py` | SQLite destekli kredi defteri ve escrow |
-| `kemi/provider.py` | Sağlayıcı düğümü: kayıt, heartbeat, parça yürütme, tahsilat |
-| `kemi/consumer.py` | İstemci: parçalama, zamanlama, hata toleransı, çoğunluk doğrulaması |
-| `kemi/tasks.py` | İzin listeli görev kayıt defteri |
-| `kemi/ai_backends.py` | Takılabilir AI backend'leri (mock / transformers) |
-| `kemi/cli.py` | `kemi` komut satırı arayüzü |
+| `kemi/crypto.py` | Ed25519 (PyNaCl → saf-Python yedeği), kanonik JSON, imzalı zarflar |
+| `kemi/identity.py` | PoW destekli anahtar çifti kimliği |
+| `kemi/dht.py` | Kademlia DHT: k-bucket'lar, yinelemeli arama, imzalı+TTL'li kayıtlar, gözlemlenen-adres (NAT tespiti) |
+| `kemi/discovery.py` | DHT üstünde sağlayıcı ilanı/keşfi |
+| `kemi/gossip_ledger.py` | İmzalı işlem CRDT'si: dedikodu çoğaltması, çift harcama kanıtı, seq rezervasyonu |
+| `kemi/reputation.py` | Yerel itibar puanları (Beta tahmini) ve yasaklama |
+| `kemi/sandbox.py` | rlimit'li alt süreç yalıtımı |
+| `kemi/node.py` | Birleşik eş: TCP servisleri, gossip döngüleri, sağlayıcı hizmeti, relay (iki taraf), GPU keşfi |
+| `kemi/consumer.py` | Parçalama, zamanlama, hata toleransı, çoğunluk doğrulaması, parça başına imzalı ödeme |
+| `kemi/protocol.py` | TCP tel protokolü: uzunluk önekli JSON |
+| `kemi/tasks.py`, `kemi/ai_backends.py` | İzin listeli görevler, takılabilir AI backend'leri |
+| `kemi/cli.py`, `kemi/demo.py` | Komut satırı ve uçtan uca gösterim |
 
 ## Testler
 
@@ -110,16 +124,12 @@ echo '["P2P ağlar neden önemli?"]' | \
 python3 -m unittest discover -s tests -v
 ```
 
-25 test; uçtan uca senaryolar dahil: kredi akışının tutarlılığı, **hileli sağlayıcının çoğunluk oylamasıyla alt edilmesi**, çökmüş sağlayıcının etrafından dolaşılması.
+47 test: kripto çapraz-backend birlikte çalışabilirliği, PoW kimlik, DHT depolama/arama, defter yakınsaması ve çift harcama kanıtı, itibar/yasaklama, sandbox, relay üzerinden NAT'lı sağlayıcı ve hileli sağlayıcının çoğunlukla alt edilmesi dahil uçtan uca sürü senaryoları.
 
-## Yol haritası (MVP'nin bilinçli sınırları)
+## Yol haritası
 
-Bu sürüm çalışan bir MVP'dir; üretime giden yol şu adımlardan geçer:
-
-- **Merkeziyetsiz keşif:** Tracker yerine Kademlia tarzı DHT (BitTorrent'in izlediği yolun aynısı).
-- **Merkeziyetsiz defter:** Kredi defterinin tracker'dan çıkarılıp imzalı işlem zincirine taşınması.
-- **Kriptografik kimlik:** Token-hash kimliğin Ed25519 anahtar çiftleri ve imzalı mesajlarla değiştirilmesi; TLS.
-- **NAT geçişi:** Ev kullanıcıları için UDP hole punching / relay.
-- **Sandbox:** Görevlerin container/WASM içinde yalıtılması ve gerçek kaynak kotaları.
-- **GPU desteği:** GPU keşfi ve `ai.generate` için GPU'lu backend'ler; büyük modellerin katman-bazlı bölünmesi (pipeline parallelism).
-- **İtibar sistemi:** Doğrulama sonuçlarından beslenen sağlayıcı itibar puanları ve fiyat/itibar bazlı zamanlayıcı.
+- **Sert kesinlik:** Pay-ağırlıklı çekirdek (quorum) makbuzlarıyla işlem kesinliği; defterin dönemsel özetlerle (checkpoint) budanması.
+- **Tam delik açma:** Relay'e ek olarak UDP hole-punching ile NAT'lar arası doğrudan görev trafiği.
+- **Daha sert yalıtım:** Container/WASM çalıştırıcı, dosya sistemi ve ağ ad alanları, gerçek GPU kotaları.
+- **Büyük model paralelliği:** `ai.generate`'in katman-bazlı (pipeline) bölünerek tek başına sığmayan modellerin sürüde koşturulması.
+- **Şifreli iş yükleri:** Uçtan uca şifreli parça içerikleri; relay hiçbir şey okuyamasın.

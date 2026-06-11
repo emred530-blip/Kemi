@@ -1,8 +1,9 @@
-"""Kemi: BitTorrent-benzeri P2P islem gucu paylasim agi.
+"""Kemi: merkeziyetsiz P2P islem gucu paylasim agi.
 
-A peer-to-peer compute sharing network. Providers rent out spare CPU/GPU
-capacity in exchange for credits; consumers split jobs into chunks (like
-BitTorrent pieces) and distribute them across the swarm.
+A fully decentralised peer-to-peer compute sharing network: Kademlia DHT
+discovery, Ed25519 proof-of-work identities, a gossip-replicated credit
+ledger, redundancy-verified execution and NAT relaying - no tracker, no
+servers, no special roles.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

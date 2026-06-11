@@ -42,14 +42,5 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
             await send_message(FakeWriter(), {"data": "x" * (MAX_MESSAGE_BYTES + 1)})
 
 
-class IdentityTests(unittest.TestCase):
-    def test_token_verification(self):
-        from kemi.identity import Identity, verify_token
-
-        identity = Identity.create()
-        self.assertTrue(verify_token(identity.node_id, identity.token))
-        self.assertFalse(verify_token(identity.node_id, "wrong-token"))
-
-
 if __name__ == "__main__":
     unittest.main()

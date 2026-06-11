@@ -1,11 +1,15 @@
 """Command line interface.
 
-    kemi tracker                       # run a tracker (discovery + ledger)
-    kemi provide --tracker HOST:PORT   # rent out this machine's compute
-    kemi providers --tracker ...       # list the active swarm
-    kemi balance --tracker ...         # show credit balance
-    kemi run --tracker ... --task ...  # submit a job to the swarm
-    kemi demo                          # full local end-to-end demonstration
+    kemi node --peer HOST:PORT             # join the swarm as a plain peer
+    kemi node --provide --peer HOST:PORT   # join and rent out compute
+    kemi providers --peer HOST:PORT        # list discoverable providers
+    kemi balance --peer HOST:PORT          # show credit balance
+    kemi run --peer HOST:PORT --task ...   # submit a job to the swarm
+    kemi id                                # show this machine's identity
+    kemi demo                              # local decentralised swarm demo
+
+There is no tracker and no server role: any running ``kemi node`` can be
+the ``--peer`` another node bootstraps through.
 """
 
 from __future__ import annotations
@@ -16,12 +20,16 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 from . import __version__
 from .consumer import Consumer, Job
 from .identity import DEFAULT_IDENTITY_PATH, Identity
-from .provider import ProviderNode
-from .tracker import Tracker
+from .node import PeerNode
+from .tasks import TASKS
+
+DEFAULT_LEDGER_PATH = "~/.kemi/ledger.db"
+DEFAULT_REPUTATION_PATH = "~/.kemi/reputation.db"
 
 
 def _parse_endpoint(value: str) -> tuple[str, int]:
@@ -31,46 +39,59 @@ def _parse_endpoint(value: str) -> tuple[str, int]:
     return host, int(port)
 
 
-def _load_identity(args: argparse.Namespace) -> Identity:
-    return Identity.load_or_create(args.identity)
+def _expand_db(path: str) -> str:
+    if path == ":memory:":
+        return path
+    expanded = Path(path).expanduser()
+    expanded.parent.mkdir(parents=True, exist_ok=True)
+    return str(expanded)
 
 
-def _add_common(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--tracker", type=_parse_endpoint, required=True,
-                        metavar="HOST:PORT", help="tracker endpoint")
+def _add_common(parser: argparse.ArgumentParser, peers_required: bool = True) -> None:
+    parser.add_argument("--peer", type=_parse_endpoint, action="append", default=[],
+                        required=peers_required, metavar="HOST:PORT",
+                        help="existing peer(s) to bootstrap through (repeatable)")
     parser.add_argument("--identity", default=DEFAULT_IDENTITY_PATH,
                         help="path to identity file (created if missing)")
+    parser.add_argument("--ledger", default=DEFAULT_LEDGER_PATH,
+                        help="path to the local ledger replica")
+    parser.add_argument("--reputation", default=DEFAULT_REPUTATION_PATH,
+                        help="path to the local reputation store")
 
 
-async def _cmd_tracker(args: argparse.Namespace) -> int:
-    tracker = Tracker(host=args.host, port=args.port, db_path=args.db)
-    await tracker.start()
-    print(f"kemi tracker listening on {args.host}:{tracker.port} (ledger: {args.db})")
-    try:
-        await tracker.serve_forever()
-    except asyncio.CancelledError:
-        pass
-    finally:
-        await tracker.stop()
-    return 0
-
-
-async def _cmd_provide(args: argparse.Namespace) -> int:
-    identity = _load_identity(args)
-    node = ProviderNode(
+def _make_node(args: argparse.Namespace, **overrides: Any) -> PeerNode:
+    identity = Identity.load_or_create(args.identity)
+    return PeerNode(
         identity=identity,
-        tracker_host=args.tracker[0],
-        tracker_port=args.tracker[1],
+        bootstrap=args.peer,
+        ledger_path=_expand_db(args.ledger),
+        reputation_path=_expand_db(args.reputation),
+        **overrides,
+    )
+
+
+async def _cmd_node(args: argparse.Namespace) -> int:
+    node = _make_node(
+        args,
         host=args.host,
         port=args.port,
         advertise_host=args.advertise_host,
+        provide=args.provide,
         price=args.price,
         max_workers=args.workers,
+        sandbox=not args.no_sandbox,
         ai_backend=None if args.ai_backend == "none" else args.ai_backend,
+        force_relay=args.force_relay,
     )
     await node.start()
-    print(f"provider {identity.short_id} serving on port {node.port}, "
-          f"price {node.price} credits/item, tasks: {', '.join(node.supported_tasks)}")
+    role = "provider" if args.provide else "peer"
+    print(f"kemi {role} {node.identity.short_id} listening on port {node.port} "
+          f"(tcp+udp); bootstrap this node with: --peer <bu-makinenin-ip>:{node.port}")
+    if args.provide:
+        print(f"  price: {node.price} credits/item, sandbox: {node.sandbox}, "
+              f"tasks: {', '.join(node.supported_tasks)}")
+        if node.resources.get("gpus"):
+            print(f"  gpus: {node.resources['gpus']}")
     try:
         await node.serve_forever()
     except asyncio.CancelledError:
@@ -80,25 +101,46 @@ async def _cmd_provide(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _with_ephemeral_node(args: argparse.Namespace):
+    node = _make_node(args, host="0.0.0.0", port=0, provide=False)
+    await node.start()
+    return node
+
+
 async def _cmd_providers(args: argparse.Namespace) -> int:
-    consumer = Consumer(_load_identity(args), *args.tracker)
-    providers = await consumer.list_providers()
-    if not providers:
-        print("no active providers")
+    node = await _with_ephemeral_node(args)
+    try:
+        consumer = Consumer(node)
+        seen: dict[str, dict[str, Any]] = {}
+        tasks = [args.task] if args.task else list(TASKS)
+        for task in tasks:
+            for record in await consumer.list_providers(task):
+                seen[record["node_id"]] = record
+        if not seen:
+            print("no providers discovered")
+            return 0
+        for record in seen.values():
+            res = record.get("resources", {})
+            gpus = res.get("gpus") or []
+            via = f"relay {record['relay']['host']}:{record['relay']['port']}" \
+                if record.get("relay") else f"{record['host']}:{record['port']}"
+            print(f"{record['node_id'][:12]}  {via}  {record['price']:.2f} cr/item  "
+                  f"rep={node.reputation.score(record['node_id']):.2f}  "
+                  f"cpu={res.get('cpu_count', '?')} gpu={len(gpus)}  "
+                  f"tasks={','.join(record['tasks'])}")
         return 0
-    for p in providers:
-        res = p.get("resources", {})
-        print(f"{p['node_id'][:12]}  {p['host']}:{p['port']}  "
-              f"{p['price']:.2f} cr/item  load={p['load']}  "
-              f"cpu={res.get('cpu_count', '?')} mem={res.get('mem_total_mb', '?')}MB  "
-              f"tasks={','.join(p['tasks'])}")
-    return 0
+    finally:
+        await node.stop()
 
 
 async def _cmd_balance(args: argparse.Namespace) -> int:
-    consumer = Consumer(_load_identity(args), *args.tracker)
-    print(f"{await consumer.balance():.2f} credits")
-    return 0
+    node = await _with_ephemeral_node(args)
+    try:
+        print(f"{await Consumer(node).balance():.2f} credits "
+              f"(node {node.identity.short_id})")
+        return 0
+    finally:
+        await node.stop()
 
 
 async def _cmd_run(args: argparse.Namespace) -> int:
@@ -109,114 +151,76 @@ async def _cmd_run(args: argparse.Namespace) -> int:
     if not isinstance(items, list):
         print("error: input must be a JSON array of items", file=sys.stderr)
         return 2
-    consumer = Consumer(_load_identity(args), *args.tracker)
-    job = Job(
-        task=args.task,
-        items=items,
-        params=json.loads(args.params),
-        chunk_size=args.chunk_size,
-        redundancy=args.redundancy,
-    )
-    report = await consumer.run_job(job)
-    output = json.dumps(report.results, ensure_ascii=False, indent=2)
-    if args.output:
-        Path(args.output).write_text(output)
-    else:
-        print(output)
-    print(
-        f"\n{len(items)} items in {report.chunks} chunks via {len(report.providers_used)} "
-        f"provider(s); spent {report.spent:.2f} credits (refunded {report.refunded:.2f})",
-        file=sys.stderr,
-    )
+    node = await _with_ephemeral_node(args)
+    try:
+        consumer = Consumer(node)
+        report = await consumer.run_job(Job(
+            task=args.task,
+            items=items,
+            params=json.loads(args.params),
+            chunk_size=args.chunk_size,
+            redundancy=args.redundancy,
+        ))
+        output = json.dumps(report.results, ensure_ascii=False, indent=2)
+        if args.output:
+            Path(args.output).write_text(output)
+        else:
+            print(output)
+        print(
+            f"\n{len(items)} items in {report.chunks} chunks via "
+            f"{len(report.providers_used)} provider(s); spent {report.spent:.2f} "
+            f"credits (exposure {report.exposure:.2f})",
+            file=sys.stderr,
+        )
+        # Give fire-and-forget gossip a moment to leave the building.
+        await asyncio.sleep(0.5)
+        return 0
+    finally:
+        await node.stop()
+
+
+async def _cmd_id(args: argparse.Namespace) -> int:
+    identity = Identity.load_or_create(args.identity)
+    print(f"node_id:  {identity.node_id}")
+    print(f"pubkey:   {identity.public_key_hex}")
+    print(f"pow:      nonce={identity.pow_nonce}")
     return 0
 
 
 async def _cmd_demo(args: argparse.Namespace) -> int:
-    """Spin up a tracker and three providers locally and run two jobs."""
-    print("=== kemi demo: local swarm ===")
-    tracker = Tracker(host="127.0.0.1", port=0)
-    await tracker.start()
-    print(f"[1/4] tracker started on 127.0.0.1:{tracker.port}")
+    from .demo import run_demo
 
-    providers = []
-    for i, price in enumerate((0.5, 1.0, 1.5), start=1):
-        node = ProviderNode(
-            identity=Identity.create(),
-            tracker_host="127.0.0.1",
-            tracker_port=tracker.port,
-            host="127.0.0.1",
-            price=price,
-        )
-        await node.start()
-        providers.append(node)
-        print(f"[2/4] provider {i} ({node.identity.short_id}) on port {node.port}, "
-              f"{price} cr/item")
-
-    consumer = Consumer(Identity.create(), "127.0.0.1", tracker.port)
-    print(f"[3/4] consumer balance: {await consumer.balance():.2f} credits")
-
-    hash_job = Job(
-        task="hash.sha256",
-        items=[f"blok-{i}" for i in range(24)],
-        params={"rounds": 1000},
-        chunk_size=4,
-        redundancy=2,
-    )
-    report = await consumer.run_job(hash_job)
-    print(f"[4/4] hash.sha256: {len(report.results)} results across "
-          f"{report.chunks} chunks, redundancy=2 verified; spent {report.spent:.2f} cr")
-
-    ai_job = Job(
-        task="ai.generate",
-        items=["P2P aglar neden onemli?", "Veri merkezlerinin gelecegi nedir?"],
-        params={"max_tokens": 12},
-        chunk_size=1,
-    )
-    report = await consumer.run_job(ai_job)
-    for prompt, completion in zip(ai_job.items, report.results):
-        print(f"      ai.generate({prompt!r}) -> {completion!r}")
-
-    print(f"\nfinal consumer balance: {await consumer.balance():.2f} credits")
-    for i, node in enumerate(providers, start=1):
-        balance_msg = await node._tracker_request({"type": "balance"})
-        print(f"final provider {i} balance: {balance_msg['balance']:.2f} credits")
-
-    for node in providers:
-        await node.stop()
-    await tracker.stop()
-    print("\ndemo complete.")
-    return 0
+    return await run_demo()
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kemi",
-        description="Kemi: BitTorrent-benzeri P2P islem gucu paylasim agi",
+        description="Kemi: merkeziyetsiz P2P islem gucu paylasim agi",
     )
     parser.add_argument("--version", action="version", version=f"kemi {__version__}")
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("tracker", help="run a tracker (peer discovery + credit ledger)")
+    p = sub.add_parser("node", help="run a peer (optionally providing compute)")
+    _add_common(p, peers_required=False)
     p.add_argument("--host", default="0.0.0.0")
-    p.add_argument("--port", type=int, default=7700)
-    p.add_argument("--db", default="~/.kemi/ledger.db",
-                   help="SQLite ledger path (use :memory: for ephemeral)")
-    p.set_defaults(func=_cmd_tracker)
-
-    p = sub.add_parser("provide", help="rent out this machine's compute")
-    _add_common(p)
-    p.add_argument("--host", default="0.0.0.0")
-    p.add_argument("--port", type=int, default=0, help="0 = pick a free port")
+    p.add_argument("--port", type=int, default=7700, help="tcp+udp port (0 = random)")
     p.add_argument("--advertise-host", default=None,
-                   help="address other peers should connect to (default: --host)")
+                   help="public address to advertise (default: learned from peers)")
+    p.add_argument("--provide", action="store_true", help="rent out this machine's compute")
     p.add_argument("--price", type=float, default=1.0, help="credits per work item")
     p.add_argument("--workers", type=int, default=None, help="max concurrent chunks")
     p.add_argument("--ai-backend", default="mock", choices=("mock", "transformers", "none"))
-    p.set_defaults(func=_cmd_provide)
+    p.add_argument("--no-sandbox", action="store_true",
+                   help="run tasks in-process instead of resource-limited subprocesses")
+    p.add_argument("--force-relay", action="store_true",
+                   help="always relay through a bootstrap peer (NATed hosts)")
+    p.set_defaults(func=_cmd_node)
 
-    p = sub.add_parser("providers", help="list active providers in the swarm")
+    p = sub.add_parser("providers", help="list discoverable providers")
     _add_common(p)
+    p.add_argument("--task", default=None, help="only providers offering this task")
     p.set_defaults(func=_cmd_providers)
 
     p = sub.add_parser("balance", help="show credit balance")
@@ -234,7 +238,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output", default=None, help="write results to this file")
     p.set_defaults(func=_cmd_run)
 
-    p = sub.add_parser("demo", help="run a complete local swarm demonstration")
+    p = sub.add_parser("id", help="show (or mint) this machine's identity")
+    p.add_argument("--identity", default=DEFAULT_IDENTITY_PATH)
+    p.set_defaults(func=_cmd_id)
+
+    p = sub.add_parser("demo", help="run a complete local decentralised swarm demo")
     p.set_defaults(func=_cmd_demo)
 
     return parser
@@ -246,10 +254,8 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
-    if args.command == "tracker":
-        args.db = str(Path(args.db).expanduser()) if args.db != ":memory:" else args.db
-        if args.db != ":memory:":
-            Path(args.db).parent.mkdir(parents=True, exist_ok=True)
+    if not args.verbose:
+        logging.getLogger("kemi").setLevel(logging.WARNING)
     try:
         return asyncio.run(args.func(args))
     except KeyboardInterrupt:

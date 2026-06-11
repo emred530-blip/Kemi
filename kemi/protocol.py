@@ -23,6 +23,19 @@ class ProtocolError(Exception):
     """Raised when a peer violates the wire protocol."""
 
 
+# Everything that can go wrong talking to a remote peer; callers that must
+# survive flaky peers catch exactly this.
+NETWORK_ERRORS = (
+    ConnectionError,
+    OSError,
+    asyncio.TimeoutError,
+    asyncio.IncompleteReadError,
+    ProtocolError,
+    json.JSONDecodeError,
+    UnicodeDecodeError,
+)
+
+
 async def send_message(writer: asyncio.StreamWriter, message: dict[str, Any]) -> None:
     data = json.dumps(message, separators=(",", ":")).encode("utf-8")
     if len(data) > MAX_MESSAGE_BYTES:
