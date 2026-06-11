@@ -192,6 +192,25 @@ class GossipLedger:
     def tx_count(self) -> int:
         return self._db.execute("SELECT COUNT(*) FROM txs").fetchone()[0]
 
+    def recent_txs(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Most recent transfer payloads, newest first (for dashboards)."""
+        rows = self._db.execute(
+            "SELECT envelope FROM txs ORDER BY rowid DESC LIMIT ?", (limit,)
+        ).fetchall()
+        out = []
+        for (envelope_json,) in rows:
+            payload = json.loads(envelope_json)["payload"]
+            out.append({key: payload[key] for key in ("from", "to", "amount", "seq", "ts")})
+        return out
+
+    def double_spenders(self) -> list[str]:
+        """Accounts with provable double-spends (conflicting seq evidence)."""
+        rows = self._db.execute(
+            "SELECT DISTINCT sender FROM ("
+            " SELECT sender FROM txs GROUP BY sender, seq HAVING COUNT(*) > 1)"
+        ).fetchall()
+        return [sender for (sender,) in rows]
+
     # -- replication -------------------------------------------------------------
 
     def txs_after(self, cursor: int, limit: int = 500) -> tuple[list[dict[str, Any]], int]:

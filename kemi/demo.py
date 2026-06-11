@@ -43,7 +43,7 @@ async def _wait_for_convergence(nodes: list[PeerNode], timeout: float = 15.0) ->
     return False
 
 
-async def run_demo() -> int:
+async def run_demo(ui_port: int | None = None) -> int:
     print("=== kemi demo: merkeziyetsiz yerel suru (tracker yok) ===\n")
 
     print("[1/7] bootstrap eşi başlatılıyor (sıradan bir düğüm; relay de o)...")
@@ -138,8 +138,23 @@ async def run_demo() -> int:
         mark = "✓" if abs(a - b) < 1e-6 else "✗"
         print(f"      {label:24s} {a:20.2f} {b:20.2f}  {mark}")
 
-    for node in [*providers, consumer_node, bootstrap]:
-        await node.stop()
     print("\ndemo tamamlandı: keşif DHT ile, ödeme imzalı transferlerle, doğrulama")
     print("çoğunluk oylamasıyla yapıldı; hiçbir merkezi bileşen kullanılmadı.")
+
+    if ui_port is not None:
+        from .webui import WebUI
+
+        ui = WebUI(consumer_node, port=ui_port)
+        await ui.start()
+        print(f"\nsürü çalışmaya devam ediyor — canlı panel: {ui.url}")
+        print("(panelden iş gönderebilirsiniz; durdurmak için Ctrl+C)")
+        try:
+            await asyncio.Event().wait()
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            pass
+        finally:
+            await ui.stop()
+
+    for node in [*providers, consumer_node, bootstrap]:
+        await node.stop()
     return 0

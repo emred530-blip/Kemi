@@ -2,7 +2,7 @@
 
 Kemi, **BitTorrent'in dosya paylaşımına yaptığını işlem gücüne yapan**, tamamen merkeziyetsiz bir eşler arası (P2P) ağdır. Kullanıcılar boştaki CPU/GPU kapasitelerini **kredi karşılığında kiraya verir**; yapay zekâ çıkarımı (inference) veya başka ağır hesaplamalar yapmak isteyenler bu kredilerle **sürünün (swarm) işlem gücünü kiralar**. Amaç, merkezi veri merkezlerine olan bağımlılığı azaltmaktır.
 
-**v0.2'den beri ağda hiçbir merkezi bileşen yoktur** — tracker yok, defter sunucusu yok, özel rol yok; her katılımcı aynı `kemi node`'u çalıştırır. **v0.3**, tüm iş trafiğini uçtan uca şifreler ve katman-parçalı modeller için pipeline paralelliğini ekler.
+**v0.2'den beri ağda hiçbir merkezi bileşen yoktur** — tracker yok, defter sunucusu yok, özel rol yok; her katılımcı aynı `kemi node`'u çalıştırır. **v0.3**, tüm iş trafiğini uçtan uca şifreler ve katman-parçalı modeller için pipeline paralelliğini ekler. **v0.4**, sürüyü tarayıcıdan izleyip yönetebileceğiniz gömülü canlı web panelini getirir.
 
 ```
               ╭────────────────  KEŞİF: Kademlia DHT (UDP)  ────────────────╮
@@ -50,6 +50,8 @@ Zorunlu bağımlılık yok (Python ≥ 3.10 standart kütüphanesi yeter; `pynac
 pip install -e .            # hızlı imza için: pip install -e ".[crypto]"
 
 kemi demo                   # tek komutla yerel merkeziyetsiz sürü gösterimi
+kemi demo --ui 8080         # demo sonrası sürü ayakta kalır; canlı panel:
+                            #   http://127.0.0.1:8080/
 ```
 
 Demo tek süreçte şunları kurar ve kanıtlar: bootstrap eşi, farklı fiyatlı dürüst sağlayıcılar, **NAT arkasında relay'le çalışan** bir sağlayıcı, **hileli** bir sağlayıcı ve bir tüketici. Hileli çoğunluk oylamasıyla elenir + yasaklanır ve iş bitince **bütün replikaların aynı bakiyelere yakınsadığı** gösterilir.
@@ -79,6 +81,9 @@ echo '[[0.1,0.2,0.3]]' | kemi pipeline --peer ILK_ESIN_IP:7700 --input - \
 kemi balance --peer ILK_ESIN_IP:7700
 kemi id
 kemi status --peer ILK_ESIN_IP:7700
+
+# 7. Canlı web paneli: sağlayıcılar, defter, itibar + tarayıcıdan iş gönderme
+kemi node --peer ILK_ESIN_IP:7700 --ui 8080   # http://127.0.0.1:8080/
 ```
 
 Tüm iş trafiği varsayılan olarak **uçtan uca şifrelidir** (sağlayıcı kaydı `e2e` yeteneğini ilan eder; `Job(encrypt=False)` ile kapatılabilir).
@@ -98,6 +103,17 @@ kemi node --provide --peer ... --ai-backend transformers
 echo '["P2P ağlar neden önemli?"]' | \
     kemi run --peer ... --task ai.generate --input - --params '{"max_tokens": 64}'
 ```
+
+### Canlı web paneli
+
+`--ui PORT` ile her düğüm, bağımlılıksız bir kontrol paneli sunar:
+
+- **Sağlayıcılar (canlı):** fiyat, itibar puanı, CPU/GPU, direkt/relay yolu, e2e rozeti — yasaklı/işaretli düğümler otomatik elenmiş hâlde.
+- **İş gönderme:** görev seç, JSON öğeleri yapıştır, parça boyutu/artıklık ayarla; iş sürüde koşarken durumunu ve maliyetini tablodan izle.
+- **Defter:** bakiye, son transferler ve varsa çift harcama kanıtları (⚑).
+- **İtibar:** bu düğümün gözünden eş puanları.
+
+Panel varsayılan olarak yalnızca `127.0.0.1`'e bağlanır (kimlik doğrulaması yoktur; dışarı açacaksanız güvendiğiniz bir ters vekilin arkasına koyun). Sayfa 2 saniyede bir kendini yeniler.
 
 ## Yerleşik görev türleri
 
@@ -127,6 +143,7 @@ Yeni yetenekler `kemi/tasks.py` içine görev kaydederek eklenir; güvenlik sın
 | `kemi/consumer.py` | Parçalama, zamanlama, hata toleransı, çoğunluk doğrulaması, parça başına imzalı ödeme |
 | `kemi/protocol.py` | TCP tel protokolü: uzunluk önekli JSON |
 | `kemi/tasks.py`, `kemi/ai_backends.py` | İzin listeli görevler, takılabilir AI backend'leri |
+| `kemi/webui.py` | Gömülü canlı web paneli (stdlib HTTP; sağlayıcılar, defter, itibar, iş gönderme) |
 | `kemi/cli.py`, `kemi/demo.py` | Komut satırı ve uçtan uca gösterim |
 
 ## Testler
@@ -135,7 +152,7 @@ Yeni yetenekler `kemi/tasks.py` içine görev kaydederek eklenir; güvenlik sın
 python3 -m unittest discover -s tests -v
 ```
 
-64 test: kripto çapraz-backend birlikte çalışabilirliği (saf-Python NaCl uygulaması libsodium'a karşı bayt-bayt doğrulanır; RFC 7748/8439 test vektörleri), PoW kimlik, DHT depolama/arama, defter yakınsaması ve çift harcama kanıtı, itibar/yasaklama, sandbox, relay üzerinden NAT'lı sağlayıcı, relay'in yalnızca şifreli metin gördüğünün kanıtı, pipeline kompozisyonu ve hileli sağlayıcının çoğunlukla alt edilmesi dahil uçtan uca sürü senaryoları.
+69 test: kripto çapraz-backend birlikte çalışabilirliği (saf-Python NaCl uygulaması libsodium'a karşı bayt-bayt doğrulanır; RFC 7748/8439 test vektörleri), PoW kimlik, DHT depolama/arama, defter yakınsaması ve çift harcama kanıtı, itibar/yasaklama, sandbox, relay üzerinden NAT'lı sağlayıcı, relay'in yalnızca şifreli metin gördüğünün kanıtı, pipeline kompozisyonu ve hileli sağlayıcının çoğunlukla alt edilmesi dahil uçtan uca sürü senaryoları.
 
 ## Yol haritası
 

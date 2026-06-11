@@ -93,11 +93,20 @@ async def _cmd_node(args: argparse.Namespace) -> int:
               f"tasks: {', '.join(node.supported_tasks)}")
         if node.resources.get("gpus"):
             print(f"  gpus: {node.resources['gpus']}")
+    ui = None
+    if args.ui is not None:
+        from .webui import WebUI
+
+        ui = WebUI(node, host=args.ui_host, port=args.ui)
+        await ui.start()
+        print(f"  dashboard: {ui.url}")
     try:
         await node.serve_forever()
     except asyncio.CancelledError:
         pass
     finally:
+        if ui is not None:
+            await ui.stop()
         await node.stop()
     return 0
 
@@ -241,7 +250,7 @@ async def _cmd_id(args: argparse.Namespace) -> int:
 async def _cmd_demo(args: argparse.Namespace) -> int:
     from .demo import run_demo
 
-    return await run_demo()
+    return await run_demo(ui_port=args.ui)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -267,6 +276,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="run tasks in-process instead of resource-limited subprocesses")
     p.add_argument("--force-relay", action="store_true",
                    help="always relay through a bootstrap peer (NATed hosts)")
+    p.add_argument("--ui", type=int, default=None, metavar="PORT",
+                   help="serve the live web dashboard on this port")
+    p.add_argument("--ui-host", default="127.0.0.1",
+                   help="dashboard bind address (default: localhost only)")
     p.set_defaults(func=_cmd_node)
 
     p = sub.add_parser("providers", help="list discoverable providers")
@@ -307,6 +320,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=_cmd_id)
 
     p = sub.add_parser("demo", help="run a complete local decentralised swarm demo")
+    p.add_argument("--ui", type=int, default=None, metavar="PORT",
+                   help="keep the swarm running afterwards with a live dashboard")
     p.set_defaults(func=_cmd_demo)
 
     return parser
