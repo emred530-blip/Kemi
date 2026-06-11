@@ -2,7 +2,7 @@
 
 Kemi, **BitTorrent'in dosya paylaşımına yaptığını işlem gücüne yapan**, tamamen merkeziyetsiz bir eşler arası (P2P) ağdır. Kullanıcılar boştaki CPU/GPU kapasitelerini **kredi karşılığında kiraya verir**; yapay zekâ çıkarımı (inference) veya başka ağır hesaplamalar yapmak isteyenler bu kredilerle **sürünün (swarm) işlem gücünü kiralar**. Amaç, merkezi veri merkezlerine olan bağımlılığı azaltmaktır.
 
-**v0.2 itibarıyla ağda hiçbir merkezi bileşen yoktur** — tracker yok, defter sunucusu yok, özel rol yok. Her katılımcı aynı `kemi node`'u çalıştırır.
+**v0.2'den beri ağda hiçbir merkezi bileşen yoktur** — tracker yok, defter sunucusu yok, özel rol yok; her katılımcı aynı `kemi node`'u çalıştırır. **v0.3**, tüm iş trafiğini uçtan uca şifreler ve katman-parçalı modeller için pipeline paralelliğini ekler.
 
 ```
               ╭────────────────  KEŞİF: Kademlia DHT (UDP)  ────────────────╮
@@ -34,6 +34,8 @@ Kemi, **BitTorrent'in dosya paylaşımına yaptığını işlem gücüne yapan**
 | **İtibar** | Her düğüm yalnızca *birinci elden* deneyimden beslenen yerel (öznel) puan tutar — paylaşılan itibar kolay zehirlenir, birinci el deneyim zehirlenemez. Çift harcama kanıtı ise nesneldir ve işlemlerle birlikte kendisi yayılır. |
 | **NAT geçişi** | Her yanıt, isteği yapanın *gözlemlenen* dış adresini geri söyler (STUN'a gerek kalmaz). NAT arkasındaki sağlayıcı, herhangi bir erişilebilir eşe kalıcı bağlantı açar ve görev trafiği oradan **relay** edilir (TURN benzeri). |
 | **Yalıtım** | Görevler izin listelidir (ağdan asla rastgele kod çalıştırılmaz) ve buna ek olarak her parça, CPU-saniye / bellek / dosya tanıtıcısı sınırlı (`rlimit`) ayrı bir süreçte çalışır. |
+| **Gizlilik** | Parça içerikleri ve sonuçlar tüketici ile sağlayıcı arasında **uçtan uca şifrelidir** (NaCl `crypto_box` ile birebir uyumlu: X25519 + XSalsa20-Poly1305). Anahtarlar mevcut Ed25519 kimliklerden türetilir — el sıkışma gerekmez; relay'ler yalnızca şifreli metin görür. PyNaCl yoksa saf-Python uygulama devreye girer; ikisi bayt-bayt aynı çıktıyı üretir (libsodium'a karşı testli). |
+| **Büyük modeller** | **Pipeline paralelliği**: `run_pipeline` ile bir aşamanın çıktısı sonraki aşamanın girdisi olur; katmanlara bölünmüş bir model, hiçbiri modelin tamamını barındıramayan sağlayıcılar üzerinde uçtan uca koşabilir. Her aşama tam zamanlayıcı muamelesi görür (parçalama, yeniden deneme, çoğunluk doğrulaması, imzalı ödeme, şifreleme). |
 | **GPU** | `nvidia-smi` ile GPU keşfi yapılır ve kaynak ilanında yayımlanır; `transformers` backend'i GPU'da koşabilir. |
 
 ### Güven modeli (dürüst özet)
@@ -69,10 +71,17 @@ kemi providers --peer ILK_ESIN_IP:7700
 echo '["a","b","c","d"]' | kemi run --peer ILK_ESIN_IP:7700 \
     --task hash.sha256 --input - --chunk-size 2 --redundancy 2
 
-# 5. Bakiye ve kimlik
+# 5. Çok aşamalı pipeline işi (katman-parçalı model çalıştırmanın temeli)
+echo '[[0.1,0.2,0.3]]' | kemi pipeline --peer ILK_ESIN_IP:7700 --input - \
+    --stages '[{"task":"ai.layer","params":{"layer":0}},{"task":"ai.layer","params":{"layer":1}}]'
+
+# 6. Bakiye, kimlik ve eş sağlığı
 kemi balance --peer ILK_ESIN_IP:7700
 kemi id
+kemi status --peer ILK_ESIN_IP:7700
 ```
+
+Tüm iş trafiği varsayılan olarak **uçtan uca şifrelidir** (sağlayıcı kaydı `e2e` yeteneğini ilan eder; `Job(encrypt=False)` ile kapatılabilir).
 
 ### Yapay zekâ çıkarımı
 
@@ -95,6 +104,7 @@ echo '["P2P ağlar neden önemli?"]' | \
 | Görev | Açıklama | Sandbox |
 |---|---|---|
 | `ai.generate` | Metin üretimi — istemler sürüye dağıtılır | süreç-içi (model belleği) |
+| `ai.layer` | Katman-parçalı model şeridi (pipeline paralelliği) | ✓ |
 | `hash.sha256` | Çok turlu SHA-256 | ✓ |
 | `math.matmul` | Saf Python matris çarpımı (benchmark) | ✓ |
 | `text.wordcount` | Kelime/karakter/satır sayımı | ✓ |
@@ -109,6 +119,7 @@ Yeni yetenekler `kemi/tasks.py` içine görev kaydederek eklenir; güvenlik sın
 | `kemi/identity.py` | PoW destekli anahtar çifti kimliği |
 | `kemi/dht.py` | Kademlia DHT: k-bucket'lar, yinelemeli arama, imzalı+TTL'li kayıtlar, gözlemlenen-adres (NAT tespiti) |
 | `kemi/discovery.py` | DHT üstünde sağlayıcı ilanı/keşfi |
+| `kemi/e2e.py` | Uçtan uca şifreleme: NaCl box uyumlu X25519 + XSalsa20-Poly1305 (saf-Python yedekli) |
 | `kemi/gossip_ledger.py` | İmzalı işlem CRDT'si: dedikodu çoğaltması, çift harcama kanıtı, seq rezervasyonu |
 | `kemi/reputation.py` | Yerel itibar puanları (Beta tahmini) ve yasaklama |
 | `kemi/sandbox.py` | rlimit'li alt süreç yalıtımı |
@@ -124,12 +135,12 @@ Yeni yetenekler `kemi/tasks.py` içine görev kaydederek eklenir; güvenlik sın
 python3 -m unittest discover -s tests -v
 ```
 
-47 test: kripto çapraz-backend birlikte çalışabilirliği, PoW kimlik, DHT depolama/arama, defter yakınsaması ve çift harcama kanıtı, itibar/yasaklama, sandbox, relay üzerinden NAT'lı sağlayıcı ve hileli sağlayıcının çoğunlukla alt edilmesi dahil uçtan uca sürü senaryoları.
+64 test: kripto çapraz-backend birlikte çalışabilirliği (saf-Python NaCl uygulaması libsodium'a karşı bayt-bayt doğrulanır; RFC 7748/8439 test vektörleri), PoW kimlik, DHT depolama/arama, defter yakınsaması ve çift harcama kanıtı, itibar/yasaklama, sandbox, relay üzerinden NAT'lı sağlayıcı, relay'in yalnızca şifreli metin gördüğünün kanıtı, pipeline kompozisyonu ve hileli sağlayıcının çoğunlukla alt edilmesi dahil uçtan uca sürü senaryoları.
 
 ## Yol haritası
 
 - **Sert kesinlik:** Pay-ağırlıklı çekirdek (quorum) makbuzlarıyla işlem kesinliği; defterin dönemsel özetlerle (checkpoint) budanması.
 - **Tam delik açma:** Relay'e ek olarak UDP hole-punching ile NAT'lar arası doğrudan görev trafiği.
 - **Daha sert yalıtım:** Container/WASM çalıştırıcı, dosya sistemi ve ağ ad alanları, gerçek GPU kotaları.
-- **Büyük model paralelliği:** `ai.generate`'in katman-bazlı (pipeline) bölünerek tek başına sığmayan modellerin sürüde koşturulması.
-- **Şifreli iş yükleri:** Uçtan uca şifreli parça içerikleri; relay hiçbir şey okuyamasın.
+- **Gerçek model şeritleri:** `ai.layer`'ın referans uygulamasının yerine gerçek transformer katman gruplarını koyan bir backend (pipeline altyapısı hazır).
+- **Akışlı üretim:** Token-token akış (streaming) ve parça içi ara sonuç teslimi.

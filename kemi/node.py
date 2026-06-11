@@ -19,6 +19,7 @@ need to address a peer.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import platform
@@ -29,8 +30,9 @@ import time
 from typing import Any
 
 from .ai_backends import AIBackend, load_backend
-from .crypto import open_envelope, sign_envelope
+from .crypto import canonical, open_envelope, sign_envelope
 from .dht import DHTNode
+from .e2e import E2EError, derive_box_key, open_sealed, seal
 from .discovery import ANNOUNCE_INTERVAL, announce_provider, make_provider_record
 from .gossip_ledger import GossipLedger
 from .identity import POW_DIFFICULTY_BITS, Identity, verify_node_id
@@ -38,7 +40,7 @@ from .protocol import (NETWORK_ERRORS, ProtocolError, error, ok, read_message,
                        request, send_message)
 from .reputation import ReputationStore
 from .sandbox import UNSANDBOXED_TASKS, SandboxError, run_sandboxed
-from .tasks import TASKS, TaskError, run_task
+from .tasks import BACKEND_REQUIRED, TASKS, TaskError, run_task
 
 log = logging.getLogger("kemi.node")
 
@@ -171,7 +173,7 @@ class PeerNode:
     def supported_tasks(self) -> list[str]:
         names = list(TASKS)
         if self._task_context.get("ai_backend") is None:
-            names = [n for n in names if not n.startswith("ai.")]
+            names = [n for n in names if n not in BACKEND_REQUIRED]
         return names
 
     async def start(self) -> None:
@@ -403,11 +405,28 @@ class PeerNode:
 
     async def _on_task_execute(self, message: dict[str, Any]) -> dict[str, Any]:
         task = str(message.get("task", ""))
-        items = message.get("items")
-        params = dict(message.get("params") or {})
         payment = message.get("payment")
         if task not in self.supported_tasks:
             return error("unsupported_task", f"task {task!r} not offered by this provider")
+
+        # End-to-end encrypted payload: the box key is derived from the
+        # payment's signing key, which _validate_payment later proves is
+        # bound to the paying identity. Relays only ever see ciphertext.
+        box_key: bytes | None = None
+        if "enc" in message:
+            if not isinstance(payment, dict) or not isinstance(payment.get("pubkey"), str):
+                return error("bad_request", "encrypted requests need a payment envelope")
+            try:
+                box_key = derive_box_key(self.identity.key.seed,
+                                         bytes.fromhex(payment["pubkey"]))
+                inner = json.loads(open_sealed(box_key, message["enc"]))
+                items = inner.get("items")
+                params = dict(inner.get("params") or {})
+            except (E2EError, ValueError, json.JSONDecodeError) as exc:
+                return error("decrypt_failed", str(exc))
+        else:
+            items = message.get("items")
+            params = dict(message.get("params") or {})
         if not isinstance(items, list) or not items:
             return error("bad_request", "items must be a non-empty list")
 
@@ -435,6 +454,8 @@ class PeerNode:
             return error("payment_rejected", "double-spend detected; account flagged")
         self.gossip_tx(payment)
         self.reputation.record(sender, "chunk_ok")
+        if box_key is not None:
+            return ok(enc=seal(box_key, canonical({"results": results})), charged=expected)
         return ok(results=results, charged=expected)
 
     def _validate_payment(self, envelope: Any, expected: float) -> tuple[str, str | None]:

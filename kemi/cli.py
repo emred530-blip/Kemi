@@ -23,9 +23,10 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .consumer import Consumer, Job
+from .consumer import Consumer, Job, PipelineStage
 from .identity import DEFAULT_IDENTITY_PATH, Identity
 from .node import PeerNode
+from .protocol import request
 from .tasks import TASKS
 
 DEFAULT_LEDGER_PATH = "~/.kemi/ledger.db"
@@ -179,6 +180,56 @@ async def _cmd_run(args: argparse.Namespace) -> int:
         await node.stop()
 
 
+async def _cmd_pipeline(args: argparse.Namespace) -> int:
+    if args.input == "-":
+        items = json.load(sys.stdin)
+    else:
+        items = json.loads(Path(args.input).read_text())
+    stage_specs = json.loads(args.stages)
+    if not isinstance(items, list) or not isinstance(stage_specs, list):
+        print("error: input and --stages must be JSON arrays", file=sys.stderr)
+        return 2
+    stages = [PipelineStage(task=s["task"], params=s.get("params", {}),
+                            chunk_size=int(s.get("chunk_size", 8)),
+                            redundancy=int(s.get("redundancy", 1)))
+              for s in stage_specs]
+    node = await _with_ephemeral_node(args)
+    try:
+        report = await Consumer(node).run_pipeline(stages, items)
+        output = json.dumps(report.results, ensure_ascii=False, indent=2)
+        if args.output:
+            Path(args.output).write_text(output)
+        else:
+            print(output)
+        print(f"\n{len(stages)} stages over {len(items)} items; "
+              f"total spent {report.spent:.2f} credits", file=sys.stderr)
+        await asyncio.sleep(0.5)
+        return 0
+    finally:
+        await node.stop()
+
+
+async def _cmd_status(args: argparse.Namespace) -> int:
+    for host, port in args.peer:
+        try:
+            info = await request(host, port, {"type": "node.info"}, timeout=10.0)
+        except Exception as exc:
+            print(f"{host}:{port}  UNREACHABLE ({exc})")
+            continue
+        if not info.get("ok"):
+            print(f"{host}:{port}  ERROR {info.get('error')}")
+            continue
+        res = info.get("resources", {})
+        role = "provider" if info.get("provide") else "peer"
+        print(f"{host}:{port}  {role} {info.get('node_id', '')[:12]}  "
+              f"ledger={info.get('ledger_txs')} txs  dht={info.get('dht_contacts')} peers  "
+              f"relayed={info.get('relayed')}")
+        if info.get("provide"):
+            print(f"  price={info.get('price')} cr/item  cpu={res.get('cpu_count')}  "
+                  f"gpu={len(res.get('gpus') or [])}  tasks={','.join(info.get('tasks', []))}")
+    return 0
+
+
 async def _cmd_id(args: argparse.Namespace) -> int:
     identity = Identity.load_or_create(args.identity)
     print(f"node_id:  {identity.node_id}")
@@ -237,6 +288,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help=">1 cross-checks results across distinct providers")
     p.add_argument("--output", default=None, help="write results to this file")
     p.set_defaults(func=_cmd_run)
+
+    p = sub.add_parser("pipeline", help="run a multi-stage pipeline job over the swarm")
+    _add_common(p)
+    p.add_argument("--stages", required=True,
+                   help='JSON array of stages, e.g. \'[{"task":"ai.layer","params":{"layer":0}}]\'')
+    p.add_argument("--input", required=True, help="JSON array of items, or - for stdin")
+    p.add_argument("--output", default=None, help="write results to this file")
+    p.set_defaults(func=_cmd_pipeline)
+
+    p = sub.add_parser("status", help="query the health of one or more peers")
+    p.add_argument("--peer", type=_parse_endpoint, action="append", required=True,
+                   metavar="HOST:PORT")
+    p.set_defaults(func=_cmd_status)
 
     p = sub.add_parser("id", help="show (or mint) this machine's identity")
     p.add_argument("--identity", default=DEFAULT_IDENTITY_PATH)

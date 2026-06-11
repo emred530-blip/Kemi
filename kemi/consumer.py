@@ -25,7 +25,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from .crypto import canonical
 from .discovery import find_providers
+from .e2e import E2EError, derive_box_key, open_sealed, seal
 from .node import PeerNode
 from .protocol import NETWORK_ERRORS, request
 
@@ -48,6 +50,7 @@ class Job:
     chunk_size: int = 8
     redundancy: int = 1
     chunk_timeout: float = 120.0
+    encrypt: bool = True  # end-to-end encrypt payloads when the provider supports it
 
 
 @dataclass
@@ -57,6 +60,28 @@ class JobReport:
     spent: float                    # credits paid for delivered chunks
     exposure: float                 # credits signed away to providers that failed
     providers_used: dict[str, int]
+    encrypted_chunks: int = 0       # chunks that travelled end-to-end encrypted
+
+
+@dataclass
+class PipelineStage:
+    """One stage of a pipeline job: the previous stage's results become
+    this stage's items (the basis for layer-sharded model execution)."""
+
+    task: str
+    params: dict[str, Any] = field(default_factory=dict)
+    chunk_size: int = 8
+    redundancy: int = 1
+
+
+@dataclass
+class PipelineReport:
+    results: list[Any]
+    stages: list[JobReport]
+
+    @property
+    def spent(self) -> float:
+        return round(sum(stage.spent for stage in self.stages), 6)
 
 
 def _result_fingerprint(results: list[Any]) -> str:
@@ -215,9 +240,19 @@ class Consumer:
         spent = 0.0
         exposure = 0.0
 
+        encrypted_chunks = 0
+
         async def provider_worker(record: dict[str, Any]) -> None:
-            nonlocal spent, exposure
+            nonlocal spent, exposure, encrypted_chunks
             provider_id = record["node_id"]
+            # One shared box key per provider covers both directions.
+            box_key: bytes | None = None
+            if job.encrypt and record.get("e2e") and isinstance(record.get("pubkey"), str):
+                try:
+                    box_key = derive_box_key(self.node.identity.key.seed,
+                                             bytes.fromhex(record["pubkey"]))
+                except (E2EError, ValueError):
+                    box_key = None
             strikes = 0
             while not scheduler.done and strikes < MAX_PROVIDER_STRIKES:
                 chunk = scheduler.acquire(provider_id)
@@ -234,13 +269,17 @@ class Consumer:
                 # Sign the per-chunk payment. The seq is burned even if the
                 # provider fails - see GossipLedger.reserve_seq.
                 tx = ledger.make_tx(self.node.identity, provider_id, amount)
+                message: dict[str, Any] = {"type": "task.execute", "task": job.task,
+                                           "payment": tx}
+                if box_key is not None:
+                    message["enc"] = seal(box_key, canonical(
+                        {"items": chunk.items, "params": job.params}))
+                else:
+                    message["items"] = chunk.items
+                    message["params"] = job.params
                 try:
-                    response = await send_to_provider(
-                        record,
-                        {"type": "task.execute", "task": job.task,
-                         "items": chunk.items, "params": job.params, "payment": tx},
-                        timeout=job.chunk_timeout,
-                    )
+                    response = await send_to_provider(record, message,
+                                                      timeout=job.chunk_timeout)
                 except NETWORK_ERRORS as exc:
                     scheduler.fail(chunk, provider_id)
                     strikes += 1
@@ -257,7 +296,14 @@ class Consumer:
                                 provider_id[:12], chunk.index,
                                 response.get("error"), response.get("detail", ""))
                     continue
-                results = response.get("results")
+                if box_key is not None:
+                    try:
+                        inner = json.loads(open_sealed(box_key, response.get("enc") or {}))
+                        results = inner.get("results")
+                    except (E2EError, ValueError, json.JSONDecodeError):
+                        results = None
+                else:
+                    results = response.get("results")
                 if not isinstance(results, list) or len(results) != len(chunk.items):
                     scheduler.fail(chunk, provider_id)
                     strikes += 1
@@ -265,6 +311,8 @@ class Consumer:
                     self.node.reputation.record(provider_id, "chunk_fail")
                     continue
                 strikes = 0
+                if box_key is not None:
+                    encrypted_chunks += 1
                 # The transfer is now in force: apply it to our replica and
                 # gossip it so the provider's earnings become visible swarm-wide.
                 ledger.add_tx(tx)
@@ -303,4 +351,37 @@ class Consumer:
             spent=round(spent, 6),
             exposure=round(exposure, 6),
             providers_used=providers_used,
+            encrypted_chunks=encrypted_chunks,
         )
+
+    async def run_pipeline(self, stages: list[PipelineStage], items: list[Any],
+                           chunk_timeout: float = 120.0,
+                           encrypt: bool = True) -> PipelineReport:
+        """Run items through a chain of stages, each distributed over the swarm.
+
+        Stage ``k+1`` consumes stage ``k``'s outputs, so a model sharded into
+        layer groups can be executed across providers none of which could
+        host the whole model (pipeline parallelism). Every stage gets the
+        full scheduler treatment: chunking, retries, redundancy voting,
+        per-chunk signed payments and end-to-end encryption.
+        """
+        if not stages:
+            raise JobError("pipeline needs at least one stage")
+        reports: list[JobReport] = []
+        current = items
+        for index, stage in enumerate(stages):
+            report = await self.run_job(Job(
+                task=stage.task,
+                items=current,
+                params=stage.params,
+                chunk_size=stage.chunk_size,
+                redundancy=stage.redundancy,
+                chunk_timeout=chunk_timeout,
+                encrypt=encrypt,
+            ))
+            log.info("pipeline stage %d/%d (%s) done: %d items, %.2f credits",
+                     index + 1, len(stages), stage.task, len(report.results),
+                     report.spent)
+            reports.append(report)
+            current = report.results
+        return PipelineReport(results=current, stages=reports)

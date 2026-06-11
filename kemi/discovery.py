@@ -45,6 +45,7 @@ def make_provider_record(
         "tasks": tasks,
         "resources": resources,
         "relay": relay,
+        "e2e": True,  # this provider accepts end-to-end encrypted payloads
         "ts": round(time.time(), 3),
     }
     return sign_envelope(identity.key, payload)
@@ -75,5 +76,7 @@ async def find_providers(dht: DHTNode, task: str) -> list[dict[str, Any]]:
             continue
         current = fresh.get(node_id)
         if current is None or ts > current["ts"]:
-            fresh[node_id] = payload
+            # The signing key is bound to the node id (checked above), so the
+            # consumer can use it to derive an end-to-end encryption key.
+            fresh[node_id] = {**payload, "pubkey": envelope["pubkey"]}
     return list(fresh.values())

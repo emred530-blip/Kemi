@@ -46,13 +46,13 @@ async def _wait_for_convergence(nodes: list[PeerNode], timeout: float = 15.0) ->
 async def run_demo() -> int:
     print("=== kemi demo: merkeziyetsiz yerel suru (tracker yok) ===\n")
 
-    print("[1/6] bootstrap eşi başlatılıyor (sıradan bir düğüm; relay de o)...")
+    print("[1/7] bootstrap eşi başlatılıyor (sıradan bir düğüm; relay de o)...")
     bootstrap = PeerNode(Identity.create(), host="127.0.0.1", port=0)
     await bootstrap.start()
     peers = [("127.0.0.1", bootstrap.port)]
     print(f"      port {bootstrap.port} (tcp+udp), id {bootstrap.identity.short_id}")
 
-    print("[2/6] sağlayıcılar DHT'ye katılıyor...")
+    print("[2/7] sağlayıcılar DHT'ye katılıyor...")
     p_cheap = PeerNode(Identity.create(), host="127.0.0.1", port=0, bootstrap=peers,
                        provide=True, price=0.5)
     p_mid = PeerNode(Identity.create(), host="127.0.0.1", port=0, bootstrap=peers,
@@ -73,10 +73,10 @@ async def run_demo() -> int:
     consumer_node = PeerNode(Identity.create(), host="127.0.0.1", port=0, bootstrap=peers)
     await consumer_node.start()
     consumer = Consumer(consumer_node)
-    print(f"[3/6] tüketici {consumer_node.identity.short_id} katıldı, "
+    print(f"[3/7] tüketici {consumer_node.identity.short_id} katıldı, "
           f"bakiye {await consumer.balance():.2f} kredi (genesis)")
 
-    print("\n[4/6] hash.sha256 işi: 24 öğe, 6 parça, redundancy=2 (çapraz doğrulama)...")
+    print("\n[4/7] hash.sha256 işi: 24 öğe, 6 parça, redundancy=2 (çapraz doğrulama)...")
     report = await consumer.run_job(Job(
         task="hash.sha256",
         items=[f"blok-{i}" for i in range(24)],
@@ -86,12 +86,14 @@ async def run_demo() -> int:
     ))
     liar_paid = consumer_node.ledger.balance(p_liar.identity.node_id) - GENESIS_CREDITS
     print(f"      {len(report.results)} sonuç doğrulandı; {report.spent:.2f} kredi harcandı")
+    print(f"      tüm trafik uçtan uca şifreliydi ({report.encrypted_chunks} parça "
+          f"yürütmesi; relay dahil kimse içeriği okuyamaz)")
     print(f"      hilelinin sahte sonuçlarla kazanabildiği (sınırlı) tutar: {liar_paid:.2f} kredi")
     liar_score = consumer_node.reputation.score(p_liar.identity.node_id)
     print(f"      hileli sağlayıcının tüketici gözündeki itibarı: {liar_score:.2f} "
           f"(yasaklı: {consumer_node.reputation.is_banned(p_liar.identity.node_id)})")
 
-    print("\n[5/6] ai.generate işi sürüde çalışıyor...")
+    print("\n[5/7] ai.generate işi sürüde çalışıyor...")
     ai_report = await consumer.run_job(Job(
         task="ai.generate",
         items=["P2P aglar neden onemli?", "Veri merkezlerinin gelecegi nedir?"],
@@ -103,7 +105,19 @@ async def run_demo() -> int:
             ai_report.results):
         print(f"      {prompt!r} -> {completion!r}")
 
-    print("\n[6/6] dedikodu (gossip) yayılımı bekleniyor; replikalar karşılaştırılacak...")
+    print("\n[6/7] pipeline paralelliği: 3 katmanlı model şeridi, katmanlar farklı")
+    print("      sağlayıcılarda koşuyor (büyük modellerin bölünmesinin temeli)...")
+    from .consumer import PipelineStage
+
+    pipeline = await consumer.run_pipeline(
+        [PipelineStage(task="ai.layer", params={"layer": layer}, chunk_size=2)
+         for layer in range(3)],
+        items=[[0.1 * i, -0.2, 0.3] for i in range(4)],
+    )
+    print(f"      4 gizli-durum vektörü 3 aşamadan geçti; "
+          f"toplam {pipeline.spent:.2f} kredi, örnek çıktı: {pipeline.results[1]}")
+
+    print("\n[7/7] dedikodu (gossip) yayılımı bekleniyor; replikalar karşılaştırılacak...")
     everyone = [bootstrap, *providers, consumer_node]
     converged = await _wait_for_convergence(everyone)
     print(f"      tüm {len(everyone)} replika aynı işlem kümesine yakınsadı: {converged}")

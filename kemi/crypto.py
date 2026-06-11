@@ -169,6 +169,10 @@ class SigningKey:
         return cls(bytes.fromhex(seed_hex))
 
     @property
+    def seed(self) -> bytes:
+        return self._seed
+
+    @property
     def seed_hex(self) -> str:
         return self._seed.hex()
 

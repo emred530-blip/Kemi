@@ -14,12 +14,16 @@ in a provider-side plugin) so the security boundary stays explicit.
 from __future__ import annotations
 
 import hashlib
+import math
 import random
 from typing import Any, Callable
 
 TaskFn = Callable[[list[Any], dict[str, Any], dict[str, Any]], list[Any]]
 
 TASKS: dict[str, TaskFn] = {}
+
+# Tasks that only work when the provider has an AI backend configured.
+BACKEND_REQUIRED = frozenset({"ai.generate"})
 
 
 class TaskError(Exception):
@@ -93,6 +97,35 @@ def _matmul(items: list[Any], params: dict[str, Any], context: dict[str, Any]) -
             for j in range(n):
                 checksum += sum(row[k] * b[k][j] for k in range(n))
         out.append(round(checksum, 6))
+    return out
+
+
+@register_task("ai.layer")
+def _ai_layer(items: list[Any], params: dict[str, Any], context: dict[str, Any]) -> list[Any]:
+    """One shard of a layer-split model for pipeline parallelism.
+
+    Items are hidden-state vectors (lists of floats); the output feeds the
+    next stage. This reference implementation applies a deterministic
+    pseudo-layer (fixed pseudo-random affine map + tanh) so pipelines are
+    fully testable without model weights; a real backend would swap in
+    actual transformer layers here.
+    """
+    layer = int(params.get("layer", 0))
+    out = []
+    for item in items:
+        if not isinstance(item, list) or not all(isinstance(v, (int, float)) for v in item):
+            raise TaskError("ai.layer items must be vectors of numbers")
+        if len(item) > 4096:
+            raise TaskError("hidden state too wide")
+        rng = random.Random(f"kemi-layer-{layer}")
+        weights = [rng.uniform(-1.0, 1.0) for _ in item]
+        bias = rng.uniform(-0.1, 0.1)
+        mixed = []
+        for i, value in enumerate(item):
+            # cheap deterministic mixing of neighbours, then a nonlinearity
+            neighbour = item[(i + 1) % len(item)]
+            mixed.append(round(math.tanh(value * weights[i] + neighbour * 0.5 + bias), 9))
+        out.append(mixed)
     return out
 
 
