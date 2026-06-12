@@ -2,7 +2,7 @@
 
 Kemi, **BitTorrent'in dosya paylaşımına yaptığını işlem gücüne yapan**, tamamen merkeziyetsiz bir eşler arası (P2P) ağdır. Kullanıcılar boştaki CPU/GPU kapasitelerini **kredi karşılığında kiraya verir**; yapay zekâ çıkarımı (inference) veya başka ağır hesaplamalar yapmak isteyenler bu kredilerle **sürünün (swarm) işlem gücünü kiralar**. Amaç, merkezi veri merkezlerine olan bağımlılığı azaltmaktır.
 
-**v0.2'den beri ağda hiçbir merkezi bileşen yoktur** — tracker yok, defter sunucusu yok, özel rol yok; her katılımcı aynı `kemi node`'u çalıştırır. **v0.3**, tüm iş trafiğini uçtan uca şifreler ve katman-parçalı modeller için pipeline paralelliğini ekler. **v0.4**, sürüyü tarayıcıdan izleyip yönetebileceğiniz gömülü canlı web panelini getirir.
+**v0.2'den beri ağda hiçbir merkezi bileşen yoktur** — tracker yok, defter sunucusu yok, özel rol yok; her katılımcı aynı `kemi node`'u çalıştırır. **v0.3**, tüm iş trafiğini uçtan uca şifreler ve katman-parçalı modeller için pipeline paralelliğini ekler. **v0.4**, sürüyü tarayıcıdan izleyip yönetebileceğiniz gömülü canlı web panelini getirir. **v0.5**, Ollama ile **gerçek LLM çıkarımını**, sürü üzerinden **canlı token akışını (streaming)**, gerçek iş yüklerini ve 25-düğümlü ölçek/churn testlerini ekler.
 
 ```
               ╭────────────────  KEŞİF: Kademlia DHT (UDP)  ────────────────╮
@@ -88,21 +88,34 @@ kemi node --peer ILK_ESIN_IP:7700 --ui 8080   # http://127.0.0.1:8080/
 
 Tüm iş trafiği varsayılan olarak **uçtan uca şifrelidir** (sağlayıcı kaydı `e2e` yeteneğini ilan eder; `Job(encrypt=False)` ile kapatılabilir).
 
-### Yapay zekâ çıkarımı
+### Yapay zekâ çıkarımı (gerçek modellerle)
 
 ```bash
 # Bağımlılıksız deterministik mock backend (varsayılan):
 kemi node --provide --peer ... --ai-backend mock
 
-# Gerçek yerel model (Hugging Face; GPU varsa keşfedilir):
+# GERÇEK yerel model — Ollama ile (önerilen yol):
+#   1) https://ollama.com adresinden Ollama'yı kur
+#   2) ollama pull llama3.2
+#   3) işlem gücünü modele aç:
+kemi node --provide --peer ... --ai-backend ollama --ai-model llama3.2
+
+# Alternatif: Hugging Face pipeline süreç-içi (GPU varsa keşfedilir):
 pip install "kemi[ai]"
 kemi node --provide --peer ... --ai-backend transformers
 ```
 
 ```bash
+# Toplu üretim:
 echo '["P2P ağlar neden önemli?"]' | \
     kemi run --peer ... --task ai.generate --input - --params '{"max_tokens": 64}'
+
+# CANLI akış: tokenlar model ürettikçe ekranına düşer (uçtan uca şifreli):
+echo '["P2P ağlar neden önemli?"]' | \
+    kemi run --peer ... --task ai.generate --input - --stream
 ```
+
+Akış, ödemenin *önce* alındığı tek yoldur (aksi hâlde tüketici son token'dan sonra kaçabilirdi); maruziyet yine tek parça fiyatıyla sınırlıdır ve akış yapan sağlayıcılar kayıtlarında `stream` rozetini ilan eder. Panel, `ai.generate` işlerinde model çıktısını gerçek zamanlı büyürken gösterir.
 
 ### Canlı web paneli
 
@@ -119,11 +132,17 @@ Panel varsayılan olarak yalnızca `127.0.0.1`'e bağlanır (kimlik doğrulamas�
 
 | Görev | Açıklama | Sandbox |
 |---|---|---|
-| `ai.generate` | Metin üretimi — istemler sürüye dağıtılır | süreç-içi (model belleği) |
+| `ai.generate` | Metin üretimi (mock/Ollama/transformers; canlı akış desteği) | süreç-içi (model belleği) |
 | `ai.layer` | Katman-parçalı model şeridi (pipeline paralelliği) | ✓ |
+| `data.aggregate` | Map-reduce: JSON kayıtlarda grupla + topla/ortalama/min/max/say | ✓ |
+| `crypto.pbkdf2` | PBKDF2-HMAC-SHA256 anahtar sertleştirme (gerçek CPU yükü) | ✓ |
+| `compress.gzip` | Toplu sıkıştırma (metin veya base64 ikili) | ✓ |
+| `sci.matmul` | Gerçek BLAS matris çarpımı — *numpy kuruluysa otomatik ilan edilir* | ✓ |
 | `hash.sha256` | Çok turlu SHA-256 | ✓ |
 | `math.matmul` | Saf Python matris çarpımı (benchmark) | ✓ |
 | `text.wordcount` | Kelime/karakter/satır sayımı | ✓ |
+
+`sci.matmul` örneği, **yeteneğe bağlı görev** desenidir: görev yalnızca bağımlılığı bulunan sağlayıcılarda kaydolur ve yalnızca onların DHT kayıtlarında ilan edilir — ffmpeg/video kodlama gibi ağır yükler de aynı desenle eklenir.
 
 Yeni yetenekler `kemi/tasks.py` içine görev kaydederek eklenir; güvenlik sınırı her zaman isim-bazlı izin listesidir.
 
@@ -152,7 +171,7 @@ Yeni yetenekler `kemi/tasks.py` içine görev kaydederek eklenir; güvenlik sın
 python3 -m unittest discover -s tests -v
 ```
 
-69 test: kripto çapraz-backend birlikte çalışabilirliği (saf-Python NaCl uygulaması libsodium'a karşı bayt-bayt doğrulanır; RFC 7748/8439 test vektörleri), PoW kimlik, DHT depolama/arama, defter yakınsaması ve çift harcama kanıtı, itibar/yasaklama, sandbox, relay üzerinden NAT'lı sağlayıcı, relay'in yalnızca şifreli metin gördüğünün kanıtı, pipeline kompozisyonu ve hileli sağlayıcının çoğunlukla alt edilmesi dahil uçtan uca sürü senaryoları.
+87 test: 25 düğümlü sürü ölçeği, iş ortasında sağlayıcıların yarısının ölmesi (churn), disk üzerinden yeniden başlatma/seq güvenliği, canlı token akışı (tel üzerinde düz metin sızmadığının kanıtıyla), sahte Ollama sunucusuna karşı backend doğrulaması, kripto çapraz-backend birlikte çalışabilirliği (saf-Python NaCl uygulaması libsodium'a karşı bayt-bayt doğrulanır; RFC 7748/8439 test vektörleri), PoW kimlik, DHT depolama/arama, defter yakınsaması ve çift harcama kanıtı, itibar/yasaklama, sandbox, relay üzerinden NAT'lı sağlayıcı, relay'in yalnızca şifreli metin gördüğünün kanıtı, pipeline kompozisyonu ve hileli sağlayıcının çoğunlukla alt edilmesi dahil uçtan uca sürü senaryoları.
 
 ## Yol haritası
 
@@ -160,4 +179,4 @@ python3 -m unittest discover -s tests -v
 - **Tam delik açma:** Relay'e ek olarak UDP hole-punching ile NAT'lar arası doğrudan görev trafiği.
 - **Daha sert yalıtım:** Container/WASM çalıştırıcı, dosya sistemi ve ağ ad alanları, gerçek GPU kotaları.
 - **Gerçek model şeritleri:** `ai.layer`'ın referans uygulamasının yerine gerçek transformer katman gruplarını koyan bir backend (pipeline altyapısı hazır).
-- **Akışlı üretim:** Token-token akış (streaming) ve parça içi ara sonuç teslimi.
+- **Relay üzerinden akış:** Streaming şu an doğrudan bağlantı ister; relay oturumları üzerinden çoklanmış (multiplexed) akış.

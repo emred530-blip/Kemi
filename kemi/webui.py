@@ -21,6 +21,7 @@ import json
 import logging
 import secrets
 import time
+from collections import deque
 from typing import Any
 
 from . import __version__
@@ -35,6 +36,11 @@ PROVIDER_REFRESH = 5.0
 MAX_JOBS_KEPT = 50
 
 
+def _preview(results: list[Any]) -> list[Any]:
+    """First items only - the full set is downloadable per job."""
+    return results[:50]
+
+
 class WebUI:
     def __init__(self, node: PeerNode, host: str = "127.0.0.1", port: int = 8080):
         self.node = node
@@ -44,6 +50,7 @@ class WebUI:
         self._server: asyncio.Server | None = None
         self._providers_cache: dict[str, list[dict[str, Any]]] = {}
         self._jobs: dict[str, dict[str, Any]] = {}
+        self._history: deque[tuple[float, float]] = deque(maxlen=240)
         self._loops: list[asyncio.Task] = []
 
     # -- lifecycle -----------------------------------------------------------
@@ -81,6 +88,12 @@ class WebUI:
                         await self.consumer.list_providers(task_name)
                 except Exception:
                     pass
+            try:
+                self._history.append(
+                    (time.time(),
+                     self.node.ledger.balance(self.node.identity.node_id)))
+            except Exception:
+                pass
             await asyncio.sleep(PROVIDER_REFRESH)
 
     def _state(self) -> dict[str, Any]:
@@ -102,12 +115,16 @@ class WebUI:
                 "rep": round(node.reputation.score(p["node_id"]), 3),
                 "cpu": (p.get("resources") or {}).get("cpu_count"),
                 "gpus": len((p.get("resources") or {}).get("gpus") or []),
+                "stream": bool(p.get("stream")),
                 "tasks": sorted(p["tasks"]),
             }
             for p in merged.values()
         ]
         provider_rows.sort(key=lambda p: (-p["rep"], p["price"]))
-        jobs = sorted(self._jobs.values(), key=lambda j: -j["started"])[:MAX_JOBS_KEPT]
+        jobs = [
+            {k: v for k, v in j.items() if not k.startswith("_")}
+            for j in sorted(self._jobs.values(), key=lambda j: -j["started"])
+        ][:MAX_JOBS_KEPT]
         return {
             "version": __version__,
             "now": time.time(),
@@ -131,6 +148,8 @@ class WebUI:
             "providers": provider_rows,
             "reputation": node.reputation.snapshot(),
             "jobs": jobs,
+            "history": [[round(ts, 1), round(balance, 4)]
+                        for ts, balance in self._history],
         }
 
     # -- job execution -----------------------------------------------------------
@@ -163,11 +182,20 @@ class WebUI:
 
     async def _run_job(self, entry: dict[str, Any], job: Job) -> None:
         try:
+            if job.task == "ai.generate" and job.redundancy == 1:
+                try:
+                    await self._run_streaming(entry, job)
+                    return
+                except JobError:
+                    if entry.get("partial"):
+                        raise  # tokens already flowed and were paid for
+                    # no streaming provider: fall through to the batch path
             report = await self.consumer.run_job(job)
+            entry["_full_results"] = report.results
             entry.update(
                 status="done",
                 spent=report.spent,
-                results=report.results[:200],
+                results=_preview(report.results),
                 encrypted=report.encrypted_chunks,
                 providers=len(report.providers_used),
             )
@@ -178,6 +206,27 @@ class WebUI:
             entry.update(status="failed", error=f"{type(exc).__name__}: {exc}")
         finally:
             entry["finished"] = time.time()
+
+    async def _run_streaming(self, entry: dict[str, Any], job: Job) -> None:
+        """Drive ai.generate through the live token stream so the dashboard
+        shows the model's output growing in real time."""
+        partials: dict[int, str] = {}
+        async for event in self.consumer.stream_generate(job.items, job.params):
+            if event.get("done"):
+                entry["_full_results"] = event["results"]
+                entry.update(
+                    status="done",
+                    spent=event["spent"],
+                    results=_preview(event["results"]),
+                    encrypted=len(job.items),
+                    providers=1,
+                )
+                entry.pop("partial", None)
+                return
+            partials[event["item"]] = partials.get(event["item"], "") + event["token"]
+            entry["partial"] = " ⏵ ".join(
+                partials[idx] for idx in sorted(partials))[-400:]
+        raise JobError("stream ended without a final summary")
 
     # -- HTTP plumbing --------------------------------------------------------------
 
@@ -215,6 +264,16 @@ class WebUI:
             await self._respond(writer, 200, _PAGE, content_type="text/html; charset=utf-8")
         elif method == "GET" and path == "/api/state":
             await self._respond(writer, 200, self._state())
+        elif method == "GET" and path.startswith("/api/job/") and path.endswith("/results"):
+            job_id = path[len("/api/job/"):-len("/results")]
+            entry = self._jobs.get(job_id)
+            if entry is None or entry.get("_full_results") is None:
+                await self._respond(writer, 404, {"error": "no results for that job"})
+            else:
+                await self._respond(
+                    writer, 200, entry["_full_results"],
+                    extra_headers={"Content-Disposition":
+                                   f'attachment; filename="kemi-{job_id}.json"'})
         elif method == "POST" and path == "/api/job":
             try:
                 spec = json.loads(body.decode("utf-8"))
@@ -226,7 +285,8 @@ class WebUI:
             await self._respond(writer, 404, {"error": "not found"})
 
     async def _respond(self, writer: asyncio.StreamWriter, status: int,
-                       payload: Any, content_type: str = "application/json") -> None:
+                       payload: Any, content_type: str = "application/json",
+                       extra_headers: dict[str, str] | None = None) -> None:
         if isinstance(payload, (dict, list)):
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         elif isinstance(payload, str):
@@ -239,8 +299,10 @@ class WebUI:
             f"HTTP/1.1 {status} {reason}\r\n"
             f"Content-Type: {content_type}\r\n"
             f"Content-Length: {len(data)}\r\n"
-            f"Cache-Control: no-store\r\nConnection: close\r\n\r\n"
         )
+        for name, value in (extra_headers or {}).items():
+            head += f"{name}: {value}\r\n"
+        head += "Cache-Control: no-store\r\nConnection: close\r\n\r\n"
         writer.write(head.encode("latin-1") + data)
         await writer.drain()
 
@@ -320,6 +382,10 @@ _PAGE = """<!doctype html>
   </section>
   <section>
     <h2>Defter (son transferler)</h2>
+    <svg id="spark" width="100%" height="48" viewBox="0 0 400 48"
+         preserveAspectRatio="none" style="display:block;margin-bottom:10px">
+      <polyline id="sparkline" fill="none" stroke="#3fb950" stroke-width="1.5"/>
+    </svg>
     <table><thead><tr>
       <th>kimden</th><th>kime</th><th>tutar</th><th>ne zaman</th>
     </tr></thead><tbody id="txs"></tbody></table>
@@ -357,7 +423,8 @@ function render(s) {
     <td class="${p.rep >= 0.5 ? 'ok' : 'bad'}">${p.rep.toFixed(2)}</td>
     <td>${p.cpu ?? '?'} / ${p.gpus}</td>
     <td>${p.relay ? '<span class="tag">relay</span>' : '<span class="tag">direkt</span>'}` +
-      `${p.e2e ? '<span class="tag ok">e2e</span>' : ''}</td>
+      `${p.e2e ? '<span class="tag ok">e2e</span>' : ''}` +
+      `${p.stream ? '<span class="tag lnk">akış</span>' : ''}</td>
     <td>${p.tasks.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</td>
   </tr>`).join('') || '<tr><td colspan="6" class="dim">sağlayıcı keşfedilmedi…</td></tr>';
 
@@ -366,15 +433,35 @@ function render(s) {
     $('#task').innerHTML = knownTasks.map(t => `<option>${esc(t)}</option>`).join('');
   }
 
-  $('#jobs').innerHTML = s.jobs.map(j => `<tr>
-    <td>${esc(j.id)}</td><td>${esc(j.task)}</td><td>${j.items}</td>
-    <td class="${j.status === 'done' ? 'ok' : j.status === 'failed' ? 'bad' : 'lnk'}">` +
-      `${esc(j.status)}</td>
-    <td>${j.spent != null ? j.spent.toFixed(2) : '—'}</td>
-    <td class="dim" title="${j.error ? esc(j.error) : ''}">${
-      j.status === 'failed' ? esc(String(j.error).slice(0, 60))
-      : j.results ? esc(JSON.stringify(j.results).slice(0, 60)) + '…' : '…'}</td>
-  </tr>`).join('') || '<tr><td colspan="6" class="dim">henüz iş yok</td></tr>';
+  $('#jobs').innerHTML = s.jobs.map(j => {
+    let detail;
+    if (j.status === 'failed') detail = esc(String(j.error).slice(0, 60));
+    else if (j.status === 'running' && j.partial)
+      detail = `<span class="lnk">⚡ ${esc(j.partial.slice(-70))}</span>`;
+    else if (j.results)
+      detail = `<a class="lnk" href="/api/job/${esc(j.id)}/results" download>⬇ indir</a> ` +
+               esc(JSON.stringify(j.results).slice(0, 45)) + '…';
+    else detail = '…';
+    return `<tr>
+      <td>${esc(j.id)}</td><td>${esc(j.task)}</td><td>${j.items}</td>
+      <td class="${j.status === 'done' ? 'ok' : j.status === 'failed' ? 'bad' : 'lnk'}">` +
+        `${esc(j.status)}</td>
+      <td>${j.spent != null ? j.spent.toFixed(2) : '—'}</td>
+      <td class="dim" title="${j.error ? esc(j.error) : ''}">${detail}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" class="dim">henüz iş yok</td></tr>';
+
+  if (s.history.length > 1) {
+    const xs = s.history.map(h => h[0]), ys = s.history.map(h => h[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs);
+    const y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const pts = s.history.map(h => {
+      const x = x1 > x0 ? (h[0] - x0) / (x1 - x0) * 396 + 2 : 200;
+      const y = y1 > y0 ? 44 - (h[1] - y0) / (y1 - y0) * 40 : 24;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    $('#sparkline').setAttribute('points', pts.join(' '));
+  }
 
   $('#txs').innerHTML = s.ledger.recent.map(t => `<tr>
     <td>${short(t.from)}</td><td>${short(t.to)}</td>

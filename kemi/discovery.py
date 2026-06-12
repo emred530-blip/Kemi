@@ -34,6 +34,7 @@ def make_provider_record(
     tasks: list[str],
     resources: dict[str, Any],
     relay: dict[str, Any] | None = None,
+    stream: bool = False,
 ) -> dict[str, Any]:
     payload = {
         "kind": "provider",
@@ -45,7 +46,8 @@ def make_provider_record(
         "tasks": tasks,
         "resources": resources,
         "relay": relay,
-        "e2e": True,  # this provider accepts end-to-end encrypted payloads
+        "e2e": True,    # this provider accepts end-to-end encrypted payloads
+        "stream": stream,  # live token streaming for ai.generate
         "ts": round(time.time(), 3),
     }
     return sign_envelope(identity.key, payload)

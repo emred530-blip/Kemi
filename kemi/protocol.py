@@ -77,6 +77,32 @@ async def request(
             pass
 
 
+async def stream_request(
+    host: str,
+    port: int,
+    message: dict[str, Any],
+    timeout: float = 60.0,
+):
+    """Send one request and yield response messages until one carries
+    ``"end": True`` (yielded too) - the transport for token streaming."""
+    reader, writer = await asyncio.wait_for(
+        asyncio.open_connection(host, port), timeout=timeout
+    )
+    try:
+        await send_message(writer, message)
+        while True:
+            response = await asyncio.wait_for(read_message(reader), timeout=timeout)
+            yield response
+            if response.get("end"):
+                return
+    finally:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except (ConnectionError, OSError):
+            pass
+
+
 def ok(**fields: Any) -> dict[str, Any]:
     return {"ok": True, **fields}
 

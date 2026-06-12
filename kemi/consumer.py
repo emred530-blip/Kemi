@@ -29,7 +29,7 @@ from .crypto import canonical
 from .discovery import find_providers
 from .e2e import E2EError, derive_box_key, open_sealed, seal
 from .node import PeerNode
-from .protocol import NETWORK_ERRORS, request
+from .protocol import NETWORK_ERRORS, request, stream_request
 
 log = logging.getLogger("kemi.consumer")
 
@@ -353,6 +353,95 @@ class Consumer:
             providers_used=providers_used,
             encrypted_chunks=encrypted_chunks,
         )
+
+    async def stream_generate(self, prompts: list[Any],
+                              params: dict[str, Any] | None = None,
+                              chunk_timeout: float = 300.0,
+                              encrypt: bool = True):
+        """Live LLM output over the swarm: an async generator that yields
+        ``{"item", "token"}`` events as the provider produces them, then one
+        final ``{"done": True, "results", "spent", "provider"}`` summary.
+
+        Only direct (non-relayed) providers that advertise streaming are
+        eligible. Failover to another provider happens only before the first
+        token; once tokens have flowed, an interruption is surfaced as a
+        JobError rather than silently regenerating (and re-paying).
+        """
+        if not prompts:
+            raise JobError("no prompts to stream")
+        params = dict(params or {})
+        providers = [p for p in await self.list_providers("ai.generate")
+                     if p.get("stream") and not p.get("relay")]
+        if not providers:
+            raise JobError("no streaming-capable direct providers for ai.generate")
+
+        ledger = self.node.ledger
+        my_id = self.node.identity.node_id
+        last_error = "no providers tried"
+        for record in providers:
+            amount = round(record["price"] * len(prompts), 6)
+            if ledger.balance(my_id) < amount:
+                raise JobError(f"insufficient credits: balance "
+                               f"{ledger.balance(my_id):.2f} < {amount:.2f}")
+            box_key: bytes | None = None
+            if encrypt and record.get("e2e") and isinstance(record.get("pubkey"), str):
+                try:
+                    box_key = derive_box_key(self.node.identity.key.seed,
+                                             bytes.fromhex(record["pubkey"]))
+                except (E2EError, ValueError):
+                    box_key = None
+            tx = ledger.make_tx(self.node.identity, record["node_id"], amount)
+            message: dict[str, Any] = {"type": "task.stream", "task": "ai.generate",
+                                       "payment": tx}
+            if box_key is not None:
+                message["enc"] = seal(box_key, canonical(
+                    {"items": prompts, "params": params}))
+            else:
+                message["items"] = prompts
+                message["params"] = params
+
+            streamed_any = False
+            failed = False
+            try:
+                async for raw in stream_request(record["host"], record["port"],
+                                                message, timeout=chunk_timeout):
+                    event = raw
+                    if box_key is not None and "enc" in raw:
+                        try:
+                            event = json.loads(open_sealed(box_key, raw["enc"]))
+                        except (E2EError, ValueError, json.JSONDecodeError):
+                            last_error = "undecryptable stream data"
+                            failed = True
+                            break
+                    if event.get("evt") == "token":
+                        streamed_any = True
+                        yield {"item": int(event.get("item", 0)),
+                               "token": str(event.get("t", ""))}
+                        continue
+                    if raw.get("end"):
+                        if event.get("evt") == "end" and event.get("ok"):
+                            # The provider applied our transfer before
+                            # streaming; mirror it locally and gossip.
+                            ledger.add_tx(tx)
+                            self.node.gossip_tx(tx)
+                            self.node.reputation.record(record["node_id"], "chunk_ok")
+                            yield {"done": True, "results": event.get("results"),
+                                   "spent": amount, "provider": record["node_id"]}
+                            return
+                        last_error = (f"{event.get('error', raw.get('error'))}: "
+                                      f"{event.get('detail', raw.get('detail', ''))}")
+                        failed = True
+                        break
+            except NETWORK_ERRORS as exc:
+                last_error = str(exc)
+                failed = True
+            if failed:
+                self.node.reputation.record(record["node_id"], "chunk_fail")
+                log.warning("streaming via %s failed: %s",
+                            record["node_id"][:12], last_error)
+                if streamed_any:
+                    raise JobError(f"stream interrupted mid-output: {last_error}")
+        raise JobError(f"streaming failed on all providers: {last_error}")
 
     async def run_pipeline(self, stages: list[PipelineStage], items: list[Any],
                            chunk_timeout: float = 120.0,

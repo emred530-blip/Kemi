@@ -72,6 +72,11 @@ def _make_node(args: argparse.Namespace, **overrides: Any) -> PeerNode:
 
 
 async def _cmd_node(args: argparse.Namespace) -> int:
+    ai_backend = None if args.ai_backend == "none" else args.ai_backend
+    if isinstance(ai_backend, str) and args.ai_model:
+        from .ai_backends import load_backend
+
+        ai_backend = load_backend(ai_backend, model=args.ai_model)
     node = _make_node(
         args,
         host=args.host,
@@ -81,7 +86,7 @@ async def _cmd_node(args: argparse.Namespace) -> int:
         price=args.price,
         max_workers=args.workers,
         sandbox=not args.no_sandbox,
-        ai_backend=None if args.ai_backend == "none" else args.ai_backend,
+        ai_backend=ai_backend,
         force_relay=args.force_relay,
     )
     await node.start()
@@ -164,6 +169,26 @@ async def _cmd_run(args: argparse.Namespace) -> int:
     node = await _with_ephemeral_node(args)
     try:
         consumer = Consumer(node)
+        if args.stream:
+            if args.task != "ai.generate":
+                print("error: --stream only works with --task ai.generate",
+                      file=sys.stderr)
+                return 2
+            current = -1
+            async for event in consumer.stream_generate(items, json.loads(args.params)):
+                if event.get("done"):
+                    print()
+                    print(f"\n{len(items)} istem aktı; {event['spent']:.2f} kredi "
+                          f"({event['provider'][:12]} üzerinden)", file=sys.stderr)
+                    break
+                if event["item"] != current:
+                    if current >= 0:
+                        print()
+                    current = event["item"]
+                    print(f"--- istem {current + 1} ---")
+                print(event["token"], end="", flush=True)
+            await asyncio.sleep(0.5)
+            return 0
         report = await consumer.run_job(Job(
             task=args.task,
             items=items,
@@ -271,7 +296,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--provide", action="store_true", help="rent out this machine's compute")
     p.add_argument("--price", type=float, default=1.0, help="credits per work item")
     p.add_argument("--workers", type=int, default=None, help="max concurrent chunks")
-    p.add_argument("--ai-backend", default="mock", choices=("mock", "transformers", "none"))
+    p.add_argument("--ai-backend", default="mock",
+                   choices=("mock", "ollama", "transformers", "none"))
+    p.add_argument("--ai-model", default=None,
+                   help="model name for ollama/transformers (e.g. llama3.2)")
     p.add_argument("--no-sandbox", action="store_true",
                    help="run tasks in-process instead of resource-limited subprocesses")
     p.add_argument("--force-relay", action="store_true",
@@ -300,6 +328,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--redundancy", type=int, default=1,
                    help=">1 cross-checks results across distinct providers")
     p.add_argument("--output", default=None, help="write results to this file")
+    p.add_argument("--stream", action="store_true",
+                   help="ai.generate: print tokens live as the model produces them")
     p.set_defaults(func=_cmd_run)
 
     p = sub.add_parser("pipeline", help="run a multi-stage pipeline job over the swarm")

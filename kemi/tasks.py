@@ -13,6 +13,8 @@ in a provider-side plugin) so the security boundary stays explicit.
 
 from __future__ import annotations
 
+import base64
+import gzip
 import hashlib
 import math
 import random
@@ -98,6 +100,102 @@ def _matmul(items: list[Any], params: dict[str, Any], context: dict[str, Any]) -
                 checksum += sum(row[k] * b[k][j] for k in range(n))
         out.append(round(checksum, 6))
     return out
+
+
+@register_task("data.aggregate")
+def _data_aggregate(items: list[Any], params: dict[str, Any], context: dict[str, Any]) -> list[Any]:
+    """Map-reduce over JSON records: each item is a list of objects; group by
+    a key and aggregate a field (sum/avg/min/max/count). The consumer merges
+    per-chunk partials, so terabyte-scale datasets shard naturally."""
+    group_by = str(params.get("group_by", ""))
+    field = str(params.get("field", ""))
+    op = str(params.get("op", "sum"))
+    if op not in ("sum", "avg", "min", "max", "count"):
+        raise TaskError(f"unknown aggregate op: {op!r}")
+    out = []
+    for records in items:
+        if not isinstance(records, list):
+            raise TaskError("data.aggregate items must be lists of records")
+        groups: dict[str, list[float]] = {}
+        for record in records:
+            if not isinstance(record, dict):
+                raise TaskError("records must be JSON objects")
+            key = str(record.get(group_by, "∅"))
+            if op == "count":
+                groups.setdefault(key, []).append(1.0)
+            else:
+                value = record.get(field)
+                if isinstance(value, (int, float)):
+                    groups.setdefault(key, []).append(float(value))
+        reduced = {}
+        for key, values in groups.items():
+            if not values:
+                continue
+            if op in ("sum", "count"):
+                reduced[key] = round(sum(values), 9)
+            elif op == "avg":
+                reduced[key] = round(sum(values) / len(values), 9)
+            elif op == "min":
+                reduced[key] = min(values)
+            else:
+                reduced[key] = max(values)
+        out.append(reduced)
+    return out
+
+
+@register_task("crypto.pbkdf2")
+def _crypto_pbkdf2(items: list[Any], params: dict[str, Any], context: dict[str, Any]) -> list[Any]:
+    """Real CPU-bound key hardening: PBKDF2-HMAC-SHA256 over each item.
+    Useful for batch credential strengthening or honest benchmarking."""
+    iterations = min(int(params.get("iterations", 100_000)), 5_000_000)
+    salt = str(params.get("salt", "kemi")).encode("utf-8")
+    return [
+        hashlib.pbkdf2_hmac("sha256", str(item).encode("utf-8"), salt, iterations).hex()
+        for item in items
+    ]
+
+
+@register_task("compress.gzip")
+def _compress_gzip(items: list[Any], params: dict[str, Any], context: dict[str, Any]) -> list[Any]:
+    """Batch compression: items are utf-8 strings (or base64 blobs with
+    encoding="base64"); returns base64 gzip payloads with ratios."""
+    level = max(1, min(9, int(params.get("level", 6))))
+    is_base64 = params.get("encoding") == "base64"
+    out = []
+    for item in items:
+        try:
+            raw = base64.b64decode(str(item)) if is_base64 else str(item).encode("utf-8")
+        except (ValueError, TypeError) as exc:
+            raise TaskError(f"bad base64 input: {exc}")
+        packed = gzip.compress(raw, compresslevel=level)
+        out.append({
+            "data": base64.b64encode(packed).decode("ascii"),
+            "original": len(raw),
+            "compressed": len(packed),
+            "ratio": round(len(packed) / len(raw), 4) if raw else 1.0,
+        })
+    return out
+
+
+try:  # registered only where numpy exists; the provider record advertises it
+    import numpy as _np
+
+    @register_task("sci.matmul")
+    def _sci_matmul(items: list[Any], params: dict[str, Any], context: dict[str, Any]) -> list[Any]:
+        """Real BLAS-backed matrix multiplication: items are [A, B] pairs of
+        nested lists; returns the products. Orders of magnitude faster than
+        math.matmul - providers with numpy advertise this automatically."""
+        out = []
+        for pair in items:
+            if not (isinstance(pair, list) and len(pair) == 2):
+                raise TaskError("sci.matmul items must be [A, B] matrix pairs")
+            a, b = _np.asarray(pair[0], dtype=float), _np.asarray(pair[1], dtype=float)
+            if a.size > 1_000_000 or b.size > 1_000_000:
+                raise TaskError("matrix too large")
+            out.append((a @ b).round(9).tolist())
+        return out
+except ImportError:  # pragma: no cover
+    pass
 
 
 @register_task("ai.layer")

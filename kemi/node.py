@@ -29,7 +29,7 @@ import subprocess
 import time
 from typing import Any
 
-from .ai_backends import AIBackend, load_backend
+from .ai_backends import AIBackend, AIBackendError, load_backend, supports_streaming
 from .crypto import canonical, open_envelope, sign_envelope
 from .dht import DHTNode
 from .e2e import E2EError, derive_box_key, open_sealed, seal
@@ -253,6 +253,9 @@ class PeerNode:
         if message.get("type") == "relay.register":
             await self._serve_relay_session(message, reader, writer)
             return
+        if message.get("type") == "task.stream":
+            await self._serve_task_stream(message, writer)
+            return
         try:
             response = await self._dispatch(message)
         except Exception:
@@ -292,6 +295,10 @@ class PeerNode:
             if not self.provide:
                 return error("not_a_provider")
             return await self._on_task_execute(message)
+        if msg_type == "task.stream":
+            # reaches here only via relay; streaming needs a direct connection
+            return error("no_stream_via_relay",
+                         "token streaming requires a direct connection")
         return error("unknown_type", f"unknown message type: {message.get('type')!r}")
 
     # ------------------------------------------------------------------ ledger
@@ -390,6 +397,7 @@ class PeerNode:
             tasks=self.supported_tasks,
             resources=self.resources,
             relay=relay,
+            stream=supports_streaming(self._task_context.get("ai_backend")),
         )
 
     async def _announce_once(self) -> None:
@@ -403,19 +411,21 @@ class PeerNode:
             await asyncio.sleep(ANNOUNCE_INTERVAL)
             await self._announce_once()
 
-    async def _on_task_execute(self, message: dict[str, Any]) -> dict[str, Any]:
-        task = str(message.get("task", ""))
-        payment = message.get("payment")
-        if task not in self.supported_tasks:
-            return error("unsupported_task", f"task {task!r} not offered by this provider")
+    def _decode_task_payload(
+        self, message: dict[str, Any]
+    ) -> tuple[list[Any] | None, dict[str, Any], bytes | None, dict[str, Any] | None]:
+        """Extract (items, params, box_key) from a possibly encrypted request.
 
-        # End-to-end encrypted payload: the box key is derived from the
-        # payment's signing key, which _validate_payment later proves is
-        # bound to the paying identity. Relays only ever see ciphertext.
+        The box key is derived from the payment's signing key, which
+        _validate_payment later proves is bound to the paying identity.
+        Relays only ever see ciphertext.
+        """
+        payment = message.get("payment")
         box_key: bytes | None = None
         if "enc" in message:
             if not isinstance(payment, dict) or not isinstance(payment.get("pubkey"), str):
-                return error("bad_request", "encrypted requests need a payment envelope")
+                return None, {}, None, error("bad_request",
+                                             "encrypted requests need a payment envelope")
             try:
                 box_key = derive_box_key(self.identity.key.seed,
                                          bytes.fromhex(payment["pubkey"]))
@@ -423,12 +433,22 @@ class PeerNode:
                 items = inner.get("items")
                 params = dict(inner.get("params") or {})
             except (E2EError, ValueError, json.JSONDecodeError) as exc:
-                return error("decrypt_failed", str(exc))
+                return None, {}, None, error("decrypt_failed", str(exc))
         else:
             items = message.get("items")
             params = dict(message.get("params") or {})
         if not isinstance(items, list) or not items:
-            return error("bad_request", "items must be a non-empty list")
+            return None, {}, box_key, error("bad_request", "items must be a non-empty list")
+        return items, params, box_key, None
+
+    async def _on_task_execute(self, message: dict[str, Any]) -> dict[str, Any]:
+        task = str(message.get("task", ""))
+        payment = message.get("payment")
+        if task not in self.supported_tasks:
+            return error("unsupported_task", f"task {task!r} not offered by this provider")
+        items, params, box_key, problem = self._decode_task_payload(message)
+        if problem is not None:
+            return problem
 
         expected = round(self.price * len(items), 6)
         sender, problem = self._validate_payment(payment, expected)
@@ -491,6 +511,107 @@ class PeerNode:
             asyncio.to_thread(run_task, task, items, params, self._task_context),
             timeout=self.task_timeout,
         )
+
+    # --------------------------------------------------------------- streaming
+
+    async def _serve_task_stream(self, message: dict[str, Any],
+                                 writer: asyncio.StreamWriter) -> None:
+        """Live token streaming for ai.generate.
+
+        Streaming reverses the usual payment-before-result order: the
+        consumer's transfer is applied *before* tokens flow (otherwise it
+        could disconnect after the last token and never pay). Exposure stays
+        bounded by one chunk's price, the same bound as everywhere else.
+        """
+        async def finish(payload: dict[str, Any]) -> None:
+            payload = {**payload, "end": True}
+            try:
+                await send_message(writer, payload)
+            except (ConnectionError, OSError):
+                pass
+
+        backend = self._task_context.get("ai_backend")
+        task = str(message.get("task", ""))
+        if self._closed or not self.provide:
+            await finish(error("not_a_provider"))
+            return
+        if task != "ai.generate" or task not in self.supported_tasks:
+            await finish(error("unsupported_task", "streaming is only for ai.generate"))
+            return
+        if not supports_streaming(backend):
+            await finish(error("no_stream", "this provider's backend cannot stream"))
+            return
+        items, params, box_key, problem = self._decode_task_payload(message)
+        if problem is not None:
+            await finish(problem)
+            return
+        expected = round(self.price * len(items), 6)
+        sender, pay_problem = self._validate_payment(message.get("payment"), expected)
+        if pay_problem is not None:
+            await finish(error("payment_rejected", pay_problem))
+            return
+        status = self.ledger.add_tx(message["payment"])
+        if status == "invalid":
+            await finish(error("payment_rejected", "transfer failed validation"))
+            return
+        if status == "conflict":
+            self.reputation.record(sender, "double_spend")
+            self.gossip_tx(message["payment"])
+            await finish(error("payment_rejected", "double-spend detected; account flagged"))
+            return
+        self.gossip_tx(message["payment"])
+
+        max_tokens = int(params.get("max_tokens", 64))
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+
+        def produce() -> None:
+            try:
+                results = []
+                for index, prompt in enumerate(items):
+                    parts: list[str] = []
+                    for token in backend.stream(str(prompt), max_tokens=max_tokens):
+                        parts.append(token)
+                        loop.call_soon_threadsafe(queue.put_nowait, ("token", index, token))
+                    results.append("".join(parts))
+                loop.call_soon_threadsafe(queue.put_nowait, ("done", results, None))
+            except AIBackendError as exc:
+                loop.call_soon_threadsafe(queue.put_nowait, ("error", str(exc), None))
+            except Exception as exc:  # backend bug: report, don't kill the node
+                loop.call_soon_threadsafe(
+                    queue.put_nowait, ("error", f"{type(exc).__name__}: {exc}", None))
+
+        async with self._work_semaphore:
+            producer = asyncio.create_task(asyncio.to_thread(produce))
+            producer.add_done_callback(lambda t: t.exception())
+            deadline = loop.time() + self.task_timeout
+            try:
+                while True:
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        raise asyncio.TimeoutError
+                    kind, a, b = await asyncio.wait_for(queue.get(), timeout=remaining)
+                    if kind == "token":
+                        event = {"evt": "token", "item": a, "t": b}
+                        await send_message(
+                            writer,
+                            {"enc": seal(box_key, canonical(event))} if box_key else event,
+                        )
+                    elif kind == "done":
+                        self.reputation.record(sender, "chunk_ok")
+                        final = {"evt": "end", "ok": True, "results": a, "charged": expected}
+                        if box_key:
+                            await finish({"ok": True, "enc": seal(box_key, canonical(final))})
+                        else:
+                            await finish(final)
+                        return
+                    else:
+                        await finish(error("task_failed", a))
+                        return
+            except asyncio.TimeoutError:
+                await finish(error("task_timeout", f"stream exceeded {self.task_timeout}s"))
+            except (ConnectionError, OSError):
+                pass  # consumer went away; producer drains harmlessly
 
     # ------------------------------------------------------------------- relay
 
