@@ -1,216 +1,264 @@
-# Kemi — Merkeziyetsiz P2P İşlem Gücü Paylaşım Ağı
+# Kemi — The Decentralised P2P Compute Sharing Network
 
-Kemi, **BitTorrent'in dosya paylaşımına yaptığını işlem gücüne yapan**, tamamen merkeziyetsiz bir eşler arası (P2P) ağdır. Kullanıcılar boştaki CPU/GPU kapasitelerini **kredi karşılığında kiraya verir**; yapay zekâ çıkarımı (inference) veya başka ağır hesaplamalar yapmak isteyenler bu kredilerle **sürünün (swarm) işlem gücünü kiralar**. Amaç, merkezi veri merkezlerine olan bağımlılığı azaltmaktır.
+Kemi does for **computing power** what BitTorrent did for files. Anyone can
+rent out their spare CPU/GPU for **credits**; anyone can spend those credits
+to run AI inference or other heavy workloads on the **fleet** — the swarm of
+peers. The goal: make centralised data centres matter less.
 
-**v0.2'den beri ağda hiçbir merkezi bileşen yoktur** — tracker yok, defter sunucusu yok, özel rol yok; her katılımcı aynı `kemi node`'u çalıştırır. **v0.3**, tüm iş trafiğini uçtan uca şifreler ve katman-parçalı modeller için pipeline paralelliğini ekler. **v0.4**, sürüyü tarayıcıdan izleyip yönetebileceğiniz gömülü canlı web panelini getirir. **v0.5**, Ollama ile **gerçek LLM çıkarımını**, sürü üzerinden **canlı token akışını (streaming)**, gerçek iş yüklerini ve 25-düğümlü ölçek/churn testlerini ekler. **v0.6**, tanık (witness) çekirdeğiyle çift harcamayı **anlık olarak engeller** ve akışı relay üzerinden NAT'lı sağlayıcılara da taşır. **v0.7 'Katılım Sürümü'**: 60 saniyelik `kemi katil` sihirbazı, davet kodları, LAN otomatik keşfi, gemi adları + rütbeler ve `kemi ogren` etkileşimli turu.
+**Since v0.2 there is no central component anywhere** — no tracker, no ledger
+server, no special roles; every participant runs the same `kemi` node.
+**v0.3** added end-to-end encryption and pipeline parallelism. **v0.4** the
+embedded live dashboard. **v0.5** real LLM inference via Ollama, live token
+streaming, real workloads and 25-node scale tests. **v0.6** instant
+double-spend *prevention* via witness committees and streaming through
+relays. **v0.7** one-command onboarding, invite codes, LAN auto-discovery,
+ship names and ranks. **v0.8 goes global**: English-first everywhere, with
+Turkish command aliases kept on board.
 
 ```
-              ╭────────────────  KEŞİF: Kademlia DHT (UDP)  ────────────────╮
-              │   sağlayıcı kayıtları görev-anahtarlarının XOR-en-yakın     │
-              │   K düğümünde tutulur; imzalı ve kısa ömürlüdür             │
-              ╰─────────────────────────────────────────────────────────────╯
+            ╭───────────────  DISCOVERY: Kademlia DHT (UDP)  ───────────────╮
+            │  provider records live on the K nodes XOR-closest to each     │
+            │  task key; signed and short-lived                             │
+            ╰────────────────────────────────────────────────────────────────╯
    ┌──────────┐      ┌──────────┐      ┌──────────┐      ┌──────────┐
-   │  EŞ  A   │◄────►│  EŞ  B   │◄────►│  EŞ  C   │◄────►│  EŞ  D   │
-   │ sağlayıcı│      │ tüketici │      │ sıradan  │      │ sağlayıcı│
-   │ 0.5 cr/iş│      │          │      │ eş+relay │◄═════│ (NAT     │
-   └────▲─────┘      └────┬─────┘      └──────────┘ kalıcı│ arkasında│
-        │   parçalar +    │                        bağlantı└──────────┘
-        ╰── imzalı ödeme ─╯
-              ╭─────────────────────────────────────────────────────────────╮
-              │  DEFTER: imzalı transferlerin dedikodu (gossip) ile         │
-              │  çoğaltılan CRDT kümesi — her eşte tam bir replika          │
-              ╰─────────────────────────────────────────────────────────────╯
+   │  SHIP A  │◄────►│  SHIP B  │◄────►│  SHIP C  │◄────►│  SHIP D  │
+   │ provider │      │ consumer │      │ peer +   │◄═════│ (behind  │
+   │ 0.5 cr/it│      │          │      │ relay    │ persistent NAT) │
+   └────▲─────┘      └────┬─────┘      └──────────┘ conn └──────────┘
+        │   chunks +      │
+        ╰── signed pay ───╯
+            ╭────────────────────────────────────────────────────────────────╮
+            │  LEDGER: a gossip-replicated CRDT set of signed transfers —    │
+            │  every peer holds a full replica                               │
+            ╰────────────────────────────────────────────────────────────────╯
 ```
 
-## Merkeziyetsizlik nasıl sağlanıyor?
+## Join in 60 seconds
 
-| Sorun | Çözüm |
+No required dependencies (Python ≥ 3.10 standard library is enough;
+`pynacl` recommended):
+
+```bash
+pip install -e .            # for fast signatures: pip install -e ".[crypto]"
+
+kemi join                   # that's it.
+```
+
+The wizard does the rest: names your ship (derived from your identity, like
+"swift-gull-42"), **auto-discovers a fleet on your Wi-Fi** (LAN discovery),
+makes you the founding ship if there is none, asks whether you want to share
+compute, opens the live dashboard and prints the **invite code** you hand to
+friends.
+
+```bash
+kemi join --invite kemi1-mfzgc…   # join with a friend's invite code
+kemi invite --peer IP:7700        # mint an invite code for your fleet
+kemi learn                        # 3-minute interactive tour on a live fleet
+kemi demo --ui 8080               # demo fleet + live dashboard
+```
+
+The CLI is bilingual — Turkish aliases ship with it: `katil/join`,
+`filo/providers`, `bakiye/balance`, `calistir/run`, `durum/status`,
+`kimlik/id`, `ogren/learn`, `davet/invite`.
+
+### Ships and ranks
+
+In Kemi (an old Turkish word for *ship*) every node is a **ship**, and humans
+see ship names instead of hex digests. As your ship earns credits by sharing
+compute, it climbs ranks — derived purely from the ledger, so ranks cannot
+be faked:
+
+| Credits earned | Rank |
 |---|---|
-| **Eş keşfi** | Kademlia DHT (BitTorrent'in trackersız modu, BEP 5 ile aynı yaklaşım). Sağlayıcılar imzalı kayıtlarını görev başına türetilen anahtarların altında, XOR-en-yakın K düğümde yayımlar; kayıtlar TTL ile kendiliğinden eskir. Ağa katılmak için herhangi bir çalışan eş yeterlidir. |
-| **Kimlik** | Ed25519 anahtar çifti. `node_id = sha256(pubkey ‖ nonce)` ve baştan N biti sıfır olmak zorunda: kimlik basmak **proof-of-work** gerektirir, bu da Sybil saldırılarını ve bedava-kredi (faucet) istismarını pahalılaştırır. PyNaCl varsa libsodium, yoksa saf-Python RFC 8032 kullanılır. |
-| **Ödeme** | Escrow/tracker yerine **parça başına Ed25519-imzalı kredi transferi** doğrudan sağlayıcıya verilir. Defter, imzalı işlemlerin *büyüme-tek-yönlü kümesidir* (CRDT): dedikoduyla çoğalır, varış sırasından bağımsız olarak her replika aynı duruma yakınsar. |
-| **Çift harcama** | İki katman. **Engelleme:** ödeme kabulünden önce sağlayıcı, göndericinin DHT'de deterministik **tanık komitesine** (`sha256("kemi:witness:"+gönderici)` anahtarına en yakın K düğüm) başvurur; komite aynı `(gönderici, seq)` için ilk gördüğü işlemi kilitleyip imzalı makbuz verir, çakışanı kanıtla **veto eder** — yarışan iki ödemeden en fazla biri kazanır. **Tespit:** veto kaçırılsa bile çakışan imzalı işlemler dedikoduda matematiksel kanıttır; deterministik olan teki sayılır, hesap kalıcı işaretlenir. Çekirdek uyarlanabilirdir: küçük sürülerde erişilebilir tanık sayısına iner, hiç tanık yoksa iyimser moda düşer (canlılık asla kaybolmaz). |
-| **Sahte sonuç** | `--redundancy 2+`: her parça birbirinden bağımsız farklı sağlayıcılarda çalışır, sonuç parmak izleri karşılaştırılır, **çoğunluk kazanır**. Kaybedenler yerel itibar cezası yer. |
-| **İtibar** | Her düğüm yalnızca *birinci elden* deneyimden beslenen yerel (öznel) puan tutar — paylaşılan itibar kolay zehirlenir, birinci el deneyim zehirlenemez. Çift harcama kanıtı ise nesneldir ve işlemlerle birlikte kendisi yayılır. |
-| **NAT geçişi** | Her yanıt, isteği yapanın *gözlemlenen* dış adresini geri söyler (STUN'a gerek kalmaz). NAT arkasındaki sağlayıcı, herhangi bir erişilebilir eşe kalıcı bağlantı açar ve görev trafiği oradan **relay** edilir (TURN benzeri). |
-| **Yalıtım** | Görevler izin listelidir (ağdan asla rastgele kod çalıştırılmaz) ve buna ek olarak her parça, CPU-saniye / bellek / dosya tanıtıcısı sınırlı (`rlimit`) ayrı bir süreçte çalışır. |
-| **Gizlilik** | Parça içerikleri ve sonuçlar tüketici ile sağlayıcı arasında **uçtan uca şifrelidir** (NaCl `crypto_box` ile birebir uyumlu: X25519 + XSalsa20-Poly1305). Anahtarlar mevcut Ed25519 kimliklerden türetilir — el sıkışma gerekmez; relay'ler yalnızca şifreli metin görür. PyNaCl yoksa saf-Python uygulama devreye girer; ikisi bayt-bayt aynı çıktıyı üretir (libsodium'a karşı testli). |
-| **Büyük modeller** | **Pipeline paralelliği**: `run_pipeline` ile bir aşamanın çıktısı sonraki aşamanın girdisi olur; katmanlara bölünmüş bir model, hiçbiri modelin tamamını barındıramayan sağlayıcılar üzerinde uçtan uca koşabilir. Her aşama tam zamanlayıcı muamelesi görür (parçalama, yeniden deneme, çoğunluk doğrulaması, imzalı ödeme, şifreleme). |
-| **GPU** | `nvidia-smi` ile GPU keşfi yapılır ve kaynak ilanında yayımlanır; `transformers` backend'i GPU'da koşabilir. |
+| 0+ | · Cabin Boy |
+| 25+ | ⚓ Deckhand |
+| 100+ | ⚓⚓ Helmsman |
+| 300+ | ⚓⚓⚓ First Mate |
+| 1000+ | ★ Captain |
+| 5000+ | ★★ Admiral |
 
-### Güven modeli (dürüst özet)
+Your ship name and rank appear on the dashboard, in `kemi id` and in fleet
+listings.
 
-Ödeme parça istekleriyle birlikte gittiği için kötü niyetli bir sağlayıcının çalabileceği tutar **bir parçanın fiyatıyla sınırlıdır** — BitTorrent'in küçük parçalarla riski sınırlaması gibi. Defter anlık kesinlik (finality) yerine **nihai tutarlılık** sunar: hile dedikodu yayılınca kesin olarak yakalanır ve hesap yakılır. İtibar + PoW kimlik maliyeti, tekrarlanan saldırıyı ekonomik olarak anlamsızlaştırır. v0.6'dan itibaren tanık komitesi çift harcamayı çoğu durumda *baştan engeller*; kanıt-ve-işaretleme katmanı, komitenin erişilemediği uç durumlar için güvenlik ağı olarak kalır.
+## How decentralisation works
 
-## 60 saniyede katıl
-
-Zorunlu bağımlılık yok (Python ≥ 3.10 standart kütüphanesi yeter; `pynacl` önerilir):
-
-```bash
-pip install -e .            # hızlı imza için: pip install -e ".[crypto]"
-
-kemi katil                  # hepsi bu.
-```
-
-Sihirbaz gerisini halleder: gemine bir ad verir (kimliğinden türeyen
-"çevik-martı-42" gibi), **aynı Wi-Fi'daki filoyu otomatik bulur** (LAN keşfi),
-bulamazsa ilk gemi sen olursun; işlem gücünü paylaşmak isteyip istemediğini
-sorar, canlı paneli açar ve arkadaşlarına vereceğin **davet kodunu** basar.
-
-```bash
-kemi katil --davet kemi1-mfzgc…   # arkadaşının davet koduyla katıl
-kemi davet --peer IP:7700         # kendi filona davet kodu üret
-kemi ogren                        # 3 dakikalık etkileşimli tur (canlı filoyla)
-kemi demo --ui 8080               # gösterim sürüsü + canlı panel
-```
-
-CLI iki dilli: `katil/join`, `filo/providers`, `bakiye/balance`,
-`calistir/run`, `durum/status`, `kimlik/id`, `ogren/learn`.
-
-### Gemiler ve rütbeler
-
-Kemi'de ("kemi", *gemi* sözcüğünün eski hâli) her düğüm bir **gemidir** ve
-insanlar onaltılık kimlik yerine gemi adı görür. İşlem gücü paylaşarak kredi
-kazandıkça gemin **rütbe atlar** — tamamen yerel ve defterden türetilir:
-
-| Kazanılan kredi | Rütbe |
+| Problem | Solution |
 |---|---|
-| 0+ | · Miço |
-| 25+ | ⚓ Tayfa |
-| 100+ | ⚓⚓ Serdümen |
-| 300+ | ⚓⚓⚓ Reis |
-| 1000+ | ★ Kaptan |
-| 5000+ | ★★ Amiral |
+| **Peer discovery** | Kademlia DHT (the same approach as BitTorrent's trackerless mode, BEP 5). Providers publish signed records under per-task keys on the XOR-closest K nodes; records expire by TTL. Any running peer is a valid entry point. |
+| **Identity** | Ed25519 keypairs. `node_id = sha256(pubkey ‖ nonce)` must start with N zero bits: minting an identity costs **proof-of-work**, which makes Sybil attacks and faucet farming expensive. libsodium via PyNaCl when present, pure-Python RFC 8032 otherwise. |
+| **Payment** | No escrow, no tracker: a **per-chunk Ed25519-signed credit transfer** travels with each chunk. The ledger is a *grow-only set* of signed transactions (CRDT): it replicates by gossip and every replica converges regardless of arrival order. |
+| **Double-spending** | Two layers. **Prevention:** before accepting a payment, the provider consults the sender's deterministic **witness committee** (the K nodes closest to `sha256("kemi:witness:"+sender)`); witnesses lock the first transfer seen per `(sender, seq)`, co-sign a receipt and **veto** conflicts with evidence — of two racing payments at most one wins. **Detection:** even if a veto is missed, conflicting signed transactions are mathematical proof in the gossip; one is counted deterministically and the account is flagged forever. The committee adapts: it shrinks to whatever is reachable in small fleets and falls back to optimistic mode when alone (liveness is never lost). |
+| **Fabricated results** | `--redundancy 2+`: every chunk runs on distinct providers, result fingerprints are compared, **majority wins**. Losers take a local reputation hit. |
+| **Reputation** | Each node keeps local (subjective) scores fed only by *first-hand* experience — shared reputation is trivially poisoned, first-hand experience is not. Double-spend evidence, by contrast, is objective and travels with the transactions themselves. |
+| **NAT traversal** | Every response echoes the requester's *observed* external address (no STUN server needed). A NATed provider keeps a persistent connection to any reachable peer, which relays its task traffic (TURN-style). Streaming multiplexes through the same session. |
+| **Isolation** | Tasks are allowlisted (arbitrary code from the network is never executed) and each chunk additionally runs in a separate process with hard `rlimit` caps (CPU seconds / memory / file descriptors). |
+| **Privacy** | Chunk contents and results are **end-to-end encrypted** between consumer and provider (byte-compatible with NaCl `crypto_box`: X25519 + XSalsa20-Poly1305). Keys derive from the Ed25519 identities both sides already have — no handshake; relays only ever see ciphertext. Without PyNaCl a pure-Python implementation takes over; both produce identical bytes (tested against libsodium). |
+| **Large models** | **Pipeline parallelism**: with `run_pipeline` each stage's output feeds the next stage, so a layer-sharded model can run across providers none of which could host the whole model. Every stage gets the full scheduler treatment (chunking, retries, majority voting, signed payment, encryption). |
+| **GPU** | GPUs are discovered via `nvidia-smi` and advertised in resource records; the `transformers` backend can run on GPU. |
 
-Gemi adın ve rütben panelde, `kemi kimlik` çıktısında ve filo listelerinde görünür.
+### Trust model (the honest summary)
 
-Demo tek süreçte şunları kurar ve kanıtlar: bootstrap eşi, farklı fiyatlı dürüst sağlayıcılar, **NAT arkasında relay'le çalışan** bir sağlayıcı, **hileli** bir sağlayıcı ve bir tüketici. Hileli çoğunluk oylamasıyla elenir + yasaklanır ve iş bitince **bütün replikaların aynı bakiyelere yakınsadığı** gösterilir.
+Payments travel with chunk requests, so a malicious provider can keep at most
+**one chunk's price** without delivering — the same way BitTorrent bounds risk
+with small pieces. The ledger offers eventual consistency rather than instant
+finality; since v0.6 the witness committee *prevents* double-spends in most
+cases, with the evidence-and-flagging layer as the safety net wherever the
+committee is unreachable. Reputation plus the proof-of-work identity cost
+makes repeated attacks economically pointless.
 
-### Gerçek bir sürü kurmak
+## Running a real fleet
 
 ```bash
-# 1. İlk eşi başlat (hiçbir özel rolü yok; sadece ilk olan o)
+# 1. Start the first peer (it has no special role; it is merely first)
 kemi node --port 7700
 
-# 2. İşlem gücü paylaşacak her makinede (--lan: aynı ağda otomatik keşif)
-kemi node --provide --peer ILK_ESIN_IP:7700 --price 0.5 --lan
-#    NAT arkasındaysanız: --force-relay  (otomatik tespit de denenir)
+# 2. On every machine that shares compute (--lan: auto-discovery on the LAN)
+kemi node --provide --peer FIRST_PEER_IP:7700 --price 0.5 --lan
+#    Behind NAT? --force-relay  (auto-detection is attempted too)
 
-# 3. Sürüyü görüntüle
-kemi providers --peer ILK_ESIN_IP:7700
+# 3. View the fleet
+kemi providers --peer FIRST_PEER_IP:7700
 
-# 4. İş gönder: parçalara böl, 2 farklı sağlayıcıda çapraz doğrula
-echo '["a","b","c","d"]' | kemi run --peer ILK_ESIN_IP:7700 \
+# 4. Submit a job: chunked, cross-checked on 2 distinct providers
+echo '["a","b","c","d"]' | kemi run --peer FIRST_PEER_IP:7700 \
     --task hash.sha256 --input - --chunk-size 2 --redundancy 2
 
-# 5. Çok aşamalı pipeline işi (katman-parçalı model çalıştırmanın temeli)
-echo '[[0.1,0.2,0.3]]' | kemi pipeline --peer ILK_ESIN_IP:7700 --input - \
+# 5. A multi-stage pipeline job (the basis for layer-sharded models)
+echo '[[0.1,0.2,0.3]]' | kemi pipeline --peer FIRST_PEER_IP:7700 --input - \
     --stages '[{"task":"ai.layer","params":{"layer":0}},{"task":"ai.layer","params":{"layer":1}}]'
 
-# 6. Bakiye, kimlik ve eş sağlığı
-kemi balance --peer ILK_ESIN_IP:7700
+# 6. Balance, identity, peer health
+kemi balance --peer FIRST_PEER_IP:7700
 kemi id
-kemi status --peer ILK_ESIN_IP:7700
+kemi status --peer FIRST_PEER_IP:7700
 
-# 7. Canlı web paneli: sağlayıcılar, defter, itibar + tarayıcıdan iş gönderme
-kemi node --peer ILK_ESIN_IP:7700 --ui 8080   # http://127.0.0.1:8080/
+# 7. Live dashboard: providers, ledger, reputation + submit jobs from the browser
+kemi node --peer FIRST_PEER_IP:7700 --ui 8080   # http://127.0.0.1:8080/
 ```
 
-Tüm iş trafiği varsayılan olarak **uçtan uca şifrelidir** (sağlayıcı kaydı `e2e` yeteneğini ilan eder; `Job(encrypt=False)` ile kapatılabilir).
+All job traffic is **end-to-end encrypted by default** (provider records
+advertise the `e2e` capability; opt out with `Job(encrypt=False)`).
 
-### Yapay zekâ çıkarımı (gerçek modellerle)
+### AI inference (with real models)
 
 ```bash
-# Bağımlılıksız deterministik mock backend (varsayılan):
+# Dependency-free deterministic mock backend (default):
 kemi node --provide --peer ... --ai-backend mock
 
-# GERÇEK yerel model — Ollama ile (önerilen yol):
-#   1) https://ollama.com adresinden Ollama'yı kur
+# A REAL local model — via Ollama (the recommended path):
+#   1) install Ollama from https://ollama.com
 #   2) ollama pull llama3.2
-#   3) işlem gücünü modele aç:
+#   3) open your compute to the fleet:
 kemi node --provide --peer ... --ai-backend ollama --ai-model llama3.2
 
-# Alternatif: Hugging Face pipeline süreç-içi (GPU varsa keşfedilir):
+# Alternative: Hugging Face pipeline in-process (GPU used when present):
 pip install "kemi[ai]"
 kemi node --provide --peer ... --ai-backend transformers
 ```
 
 ```bash
-# Toplu üretim:
-echo '["P2P ağlar neden önemli?"]' | \
+# Batch generation:
+echo '["Why do P2P networks matter?"]' | \
     kemi run --peer ... --task ai.generate --input - --params '{"max_tokens": 64}'
 
-# CANLI akış: tokenlar model ürettikçe ekranına düşer (uçtan uca şifreli):
-echo '["P2P ağlar neden önemli?"]' | \
+# LIVE streaming: tokens land on your screen as the model produces them
+# (end-to-end encrypted):
+echo '["Why do P2P networks matter?"]' | \
     kemi run --peer ... --task ai.generate --input - --stream
 ```
 
-Akış, ödemenin *önce* alındığı tek yoldur (aksi hâlde tüketici son token'dan sonra kaçabilirdi); maruziyet yine tek parça fiyatıyla sınırlıdır ve akış yapan sağlayıcılar kayıtlarında `stream` rozetini ilan eder. **NAT arkasındaki sağlayıcılar da akış yapabilir:** tokenlar relay oturumundan çoklanarak (multiplexed) geçer ve relay yalnızca şifreli metin görür. Panel, `ai.generate` işlerinde model çıktısını gerçek zamanlı büyürken gösterir.
+Streaming is the one path where payment is taken *first* (otherwise the
+consumer could vanish after the last token); exposure is still bounded by a
+single chunk's price, and streaming-capable providers advertise the `stream`
+badge. **NATed providers can stream too**: tokens multiplex through the relay
+session, and the relay sees only ciphertext. The dashboard shows `ai.generate`
+output growing in real time.
 
-### Canlı web paneli
+### The live dashboard
 
-`--ui PORT` ile her düğüm, bağımlılıksız bir kontrol paneli sunar:
+`--ui PORT` gives every node a dependency-free control panel:
 
-- **Sağlayıcılar (canlı):** fiyat, itibar puanı, CPU/GPU, direkt/relay yolu, e2e rozeti — yasaklı/işaretli düğümler otomatik elenmiş hâlde.
-- **İş gönderme:** görev seç, JSON öğeleri yapıştır, parça boyutu/artıklık ayarla; iş sürüde koşarken durumunu ve maliyetini tablodan izle.
-- **Defter:** bakiye, son transferler ve varsa çift harcama kanıtları (⚑).
-- **İtibar:** bu düğümün gözünden eş puanları.
+- **Providers (live):** price, reputation score, CPU/GPU, direct/relay path,
+  e2e and stream badges — banned/flagged nodes filtered out automatically.
+- **Submit jobs:** pick a task, paste JSON items, set chunk size/redundancy;
+  follow status and cost live; download full results as JSON.
+- **Ledger:** balance with a time-series sparkline, latest transfers, and any
+  double-spend evidence (⚑).
+- **Reputation:** peer scores as this node sees them.
 
-Panel varsayılan olarak yalnızca `127.0.0.1`'e bağlanır (kimlik doğrulaması yoktur; dışarı açacaksanız güvendiğiniz bir ters vekilin arkasına koyun). Sayfa 2 saniyede bir kendini yeniler.
+The dashboard binds to `127.0.0.1` only by default (it has no auth; put it
+behind a reverse proxy you trust if you must expose it). It refreshes every
+2 seconds.
 
-## Yerleşik görev türleri
+## Built-in task types
 
-| Görev | Açıklama | Sandbox |
+| Task | Description | Sandboxed |
 |---|---|---|
-| `ai.generate` | Metin üretimi (mock/Ollama/transformers; canlı akış desteği) | süreç-içi (model belleği) |
-| `ai.layer` | Katman-parçalı model şeridi (pipeline paralelliği) | ✓ |
-| `data.aggregate` | Map-reduce: JSON kayıtlarda grupla + topla/ortalama/min/max/say | ✓ |
-| `crypto.pbkdf2` | PBKDF2-HMAC-SHA256 anahtar sertleştirme (gerçek CPU yükü) | ✓ |
-| `compress.gzip` | Toplu sıkıştırma (metin veya base64 ikili) | ✓ |
-| `sci.matmul` | Gerçek BLAS matris çarpımı — *numpy kuruluysa otomatik ilan edilir* | ✓ |
-| `hash.sha256` | Çok turlu SHA-256 | ✓ |
-| `math.matmul` | Saf Python matris çarpımı (benchmark) | ✓ |
-| `text.wordcount` | Kelime/karakter/satır sayımı | ✓ |
+| `ai.generate` | Text generation (mock/Ollama/transformers; live streaming) | in-process (model memory) |
+| `ai.layer` | Layer-sharded model strip (pipeline parallelism) | ✓ |
+| `data.aggregate` | Map-reduce: group JSON records + sum/avg/min/max/count | ✓ |
+| `crypto.pbkdf2` | PBKDF2-HMAC-SHA256 key hardening (real CPU work) | ✓ |
+| `compress.gzip` | Batch compression (text or base64 binary) | ✓ |
+| `sci.matmul` | Real BLAS matrix multiplication — *auto-advertised when numpy is installed* | ✓ |
+| `hash.sha256` | Multi-round SHA-256 | ✓ |
+| `math.matmul` | Pure-Python matrix multiply (benchmark) | ✓ |
+| `text.wordcount` | Word/char/line counts | ✓ |
 
-`sci.matmul` örneği, **yeteneğe bağlı görev** desenidir: görev yalnızca bağımlılığı bulunan sağlayıcılarda kaydolur ve yalnızca onların DHT kayıtlarında ilan edilir — ffmpeg/video kodlama gibi ağır yükler de aynı desenle eklenir.
+`sci.matmul` demonstrates the **capability-gated task** pattern: a task
+registers only on providers that have its dependency and is advertised only
+in their DHT records — heavy workloads like ffmpeg/video transcoding plug in
+the same way. New capabilities are added by registering tasks in
+`kemi/tasks.py`; the security boundary is always the name-based allowlist.
 
-Yeni yetenekler `kemi/tasks.py` içine görev kaydederek eklenir; güvenlik sınırı her zaman isim-bazlı izin listesidir.
+## Architecture
 
-## Mimari
-
-| Modül | Sorumluluk |
+| Module | Responsibility |
 |---|---|
-| `kemi/crypto.py` | Ed25519 (PyNaCl → saf-Python yedeği), kanonik JSON, imzalı zarflar |
-| `kemi/identity.py` | PoW destekli anahtar çifti kimliği |
-| `kemi/dht.py` | Kademlia DHT: k-bucket'lar, yinelemeli arama, imzalı+TTL'li kayıtlar, gözlemlenen-adres (NAT tespiti) |
-| `kemi/discovery.py` | DHT üstünde sağlayıcı ilanı/keşfi |
-| `kemi/e2e.py` | Uçtan uca şifreleme: NaCl box uyumlu X25519 + XSalsa20-Poly1305 (saf-Python yedekli) |
-| `kemi/gossip_ledger.py` | İmzalı işlem CRDT'si: dedikodu çoğaltması, çift harcama kanıtı, seq rezervasyonu |
-| `kemi/reputation.py` | Yerel itibar puanları (Beta tahmini) ve yasaklama |
-| `kemi/sandbox.py` | rlimit'li alt süreç yalıtımı |
-| `kemi/node.py` | Birleşik eş: TCP servisleri, gossip döngüleri, sağlayıcı hizmeti, relay (iki taraf), GPU keşfi |
-| `kemi/consumer.py` | Parçalama, zamanlama, hata toleransı, çoğunluk doğrulaması, parça başına imzalı ödeme |
-| `kemi/protocol.py` | TCP tel protokolü: uzunluk önekli JSON |
-| `kemi/tasks.py`, `kemi/ai_backends.py` | İzin listeli görevler, takılabilir AI backend'leri |
-| `kemi/webui.py` | Gömülü canlı web paneli (stdlib HTTP; sağlayıcılar, defter, itibar, iş gönderme) |
-| `kemi/names.py` | Karakter katmanı: gemi adları ve rütbeler |
-| `kemi/invite.py` | Davet kodları (`kemi1-…`, sır içermez) |
-| `kemi/lan.py` | Sıfır-ayar LAN keşfi (multicast fener) |
-| `kemi/tutorial.py` | `kemi ogren`: canlı filoyla etkileşimli tur |
-| `kemi/cli.py`, `kemi/demo.py` | Komut satırı ve uçtan uca gösterim |
+| `kemi/crypto.py` | Ed25519 (PyNaCl → pure-Python fallback), canonical JSON, signed envelopes |
+| `kemi/identity.py` | Proof-of-work keypair identities |
+| `kemi/dht.py` | Kademlia DHT: k-buckets, iterative lookup, signed+TTL records, observed-address NAT detection |
+| `kemi/discovery.py` | Provider announce/lookup on top of the DHT |
+| `kemi/e2e.py` | End-to-end encryption: NaCl-box-compatible X25519 + XSalsa20-Poly1305 (pure-Python fallback) |
+| `kemi/gossip_ledger.py` | Signed-transaction CRDT: gossip replication, double-spend evidence, seq reservation |
+| `kemi/reputation.py` | Local reputation scores (Beta estimate) and bans |
+| `kemi/sandbox.py` | rlimit-capped subprocess isolation |
+| `kemi/node.py` | The unified peer: TCP services, gossip loops, provider service, witness committee, relay (both sides), GPU discovery |
+| `kemi/consumer.py` | Chunking, scheduling, fault tolerance, majority verification, per-chunk signed payment, streaming |
+| `kemi/protocol.py` | Wire protocol: length-prefixed JSON over TCP |
+| `kemi/tasks.py`, `kemi/ai_backends.py` | Allowlisted tasks; pluggable AI backends (mock/Ollama/transformers) |
+| `kemi/webui.py` | Embedded live dashboard (stdlib HTTP) |
+| `kemi/names.py` | Character layer: ship names and ranks |
+| `kemi/invite.py` | Invite codes (`kemi1-…`, no secrets) |
+| `kemi/lan.py` | Zero-config LAN discovery (multicast beacon) |
+| `kemi/tutorial.py` | `kemi learn`: interactive tour on a live fleet |
+| `kemi/cli.py`, `kemi/demo.py` | Bilingual CLI and the end-to-end demo |
 
-## Testler
+## Tests
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-104 test: gemi adlarının deterministikliği, rütbe eşikleri, davet kodu gidiş-dönüşü/bozuk kod reddi, LAN fener keşfi, eğitim turunun uçtan uca koşumu, tanık komitesiyle eşzamanlı çift-harcama yarışının engellenmesi, veto + kanıt akışı, relay üzerinden canlı token akışı, 25 düğümlü sürü ölçeği, iş ortasında sağlayıcıların yarısının ölmesi (churn), disk üzerinden yeniden başlatma/seq güvenliği, canlı token akışı (tel üzerinde düz metin sızmadığının kanıtıyla), sahte Ollama sunucusuna karşı backend doğrulaması, kripto çapraz-backend birlikte çalışabilirliği (saf-Python NaCl uygulaması libsodium'a karşı bayt-bayt doğrulanır; RFC 7748/8439 test vektörleri), PoW kimlik, DHT depolama/arama, defter yakınsaması ve çift harcama kanıtı, itibar/yasaklama, sandbox, relay üzerinden NAT'lı sağlayıcı, relay'in yalnızca şifreli metin gördüğünün kanıtı, pipeline kompozisyonu ve hileli sağlayıcının çoğunlukla alt edilmesi dahil uçtan uca sürü senaryoları.
+104 tests, including: cross-backend crypto interoperability (the pure-Python
+NaCl implementation is verified byte-for-byte against libsodium, plus RFC
+7748/8439 vectors), PoW identities, DHT storage/lookup, ledger convergence
+and double-spend proofs, the witness committee blocking a concurrent
+double-spend race, live token streaming (with proof that no plaintext leaks
+on the wire), streaming through a relay, pipeline composition, a 25-node
+fleet, half the providers dying mid-job, restart-from-disk seq safety,
+deterministic ship names, rank thresholds, invite-code round-trips, LAN
+beacon discovery, and the tutorial running end to end.
 
-## Yol haritası
+## Roadmap
 
-- **Defter budama:** Çoklu kaynaktan doğrulanan dönemsel özetlerle (checkpoint) eski işlemlerin budanması ve hızlı önyükleme.
-- **Tanık komitesinde pay ağırlığı:** Komite üyeliğinin PoW'a ek olarak kazanılmış krediyle ağırlıklandırılması (Sybil direncini artırır).
-- **Tam delik açma:** Relay'e ek olarak UDP hole-punching ile NAT'lar arası doğrudan görev trafiği.
-- **Daha sert yalıtım:** Container/WASM çalıştırıcı, dosya sistemi ve ağ ad alanları, gerçek GPU kotaları.
-- **Gerçek model şeritleri:** `ai.layer`'ın referans uygulamasının yerine gerçek transformer katman gruplarını koyan bir backend (pipeline altyapısı hazır).
+- **Ledger pruning:** periodic checkpoints verified against multiple sources;
+  fast bootstrap for new ships.
+- **Stake-weighted witnesses:** weighting committee membership by earned
+  credits on top of PoW (stronger Sybil resistance).
+- **Full hole-punching:** direct NAT-to-NAT task traffic via UDP
+  hole-punching alongside the relay.
+- **Harder isolation:** container/WASM runner, filesystem and network
+  namespaces, real GPU quotas.
+- **Real model strips:** a backend that replaces `ai.layer`'s reference
+  implementation with actual transformer layer groups (the pipeline
+  infrastructure is ready).

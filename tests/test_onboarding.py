@@ -33,13 +33,13 @@ class ShipNameTests(unittest.TestCase):
 
 class RankTests(unittest.TestCase):
     def test_progression(self):
-        self.assertEqual(rank_for(0.0)[0], "Miço")
-        self.assertEqual(rank_for(30.0)[0], "Tayfa")
-        self.assertEqual(rank_for(150.0)[0], "Serdümen")
-        self.assertEqual(rank_for(500.0)[0], "Reis")
-        self.assertEqual(rank_for(1500.0)[0], "Kaptan")
+        self.assertEqual(rank_for(0.0)[0], "Cabin Boy")
+        self.assertEqual(rank_for(30.0)[0], "Deckhand")
+        self.assertEqual(rank_for(150.0)[0], "Helmsman")
+        self.assertEqual(rank_for(500.0)[0], "First Mate")
+        self.assertEqual(rank_for(1500.0)[0], "Captain")
         title, _, next_threshold = rank_for(10_000.0)
-        self.assertEqual(title, "Amiral")
+        self.assertEqual(title, "Admiral")
         self.assertIsNone(next_threshold)
 
     def test_next_threshold(self):
@@ -53,7 +53,7 @@ class RankTests(unittest.TestCase):
         for amount in (10.0, 20.0):
             ledger.add_tx(ledger.make_tx(alice, bob.node_id, amount))
         self.assertEqual(ledger.total_earned(bob.node_id), 30.0)
-        self.assertEqual(rank_for(ledger.total_earned(bob.node_id))[0], "Tayfa")
+        self.assertEqual(rank_for(ledger.total_earned(bob.node_id))[0], "Deckhand")
         self.assertEqual(ledger.total_earned(alice.node_id), 0.0)  # spending ≠ earning
 
 
@@ -81,7 +81,7 @@ class LanDiscoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_beacon_is_discovered(self):
         from kemi import lan
 
-        beacon = lan.LanBeacon("a" * 64, tcp_port=7711, name="test-gemisi")
+        beacon = lan.LanBeacon("a" * 64, tcp_port=7711, name="test-ship")
         await beacon.start()
         try:
             found = await lan.discover(own_id="b" * 64, timeout=1.0)
@@ -112,10 +112,10 @@ class TutorialTests(unittest.IsolatedAsyncioTestCase):
             code = await asyncio.wait_for(run_tutorial(fast=True), timeout=120)
         output = stdout.getvalue()
         self.assertEqual(code, 0)
-        self.assertIn("ADIM 1/5", output)
-        self.assertIn("ADIM 5/5", output)
-        self.assertIn("kredi", output)
-        self.assertIn("kemi katil", output)
+        self.assertIn("STEP 1/5", output)
+        self.assertIn("STEP 5/5", output)
+        self.assertIn("credits", output)
+        self.assertIn("kemi join", output)
 
 
 class CliSurfaceTests(unittest.TestCase):
@@ -127,9 +127,11 @@ class CliSurfaceTests(unittest.TestCase):
             (["bakiye", "--peer", "1.2.3.4:7700"], "_cmd_balance"),
             (["filo", "--peer", "1.2.3.4:7700"], "_cmd_providers"),
             (["durum", "--peer", "1.2.3.4:7700"], "_cmd_status"),
-            (["davet", "--peer", "1.2.3.4:7700"], "_cmd_davet"),
-            (["ogren", "--hizli"], "_cmd_ogren"),
-            (["katil", "--izle"], "_cmd_katil"),
+            (["davet", "--peer", "1.2.3.4:7700"], "_cmd_invite"),
+            (["ogren", "--hizli"], "_cmd_learn"),
+            (["katil", "--izle"], "_cmd_join"),
+            (["join", "--watch"], "_cmd_join"),
+            (["learn", "--fast"], "_cmd_learn"),
         ):
             args = parser.parse_args(argv)
             self.assertEqual(args.func.__name__, command, argv)

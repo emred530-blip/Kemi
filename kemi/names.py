@@ -1,8 +1,8 @@
 """Ship names and ranks: Kemi's character layer.
 
-"Kemi" is an old word for "gemi" (ship) - so every node IS a ship. Instead
+"Kemi" is an old Turkish word for ship - so every node IS a ship. Instead
 of asking humans to recognise hex digests, each node gets a deterministic,
-memorable ship name derived from its node id ("çevik-martı-42"), and earns
+memorable ship name derived from its node id ("swift-gull-42"), and earns
 naval ranks as it contributes compute to the fleet. Names and ranks are
 pure presentation: the protocol still speaks node ids.
 """
@@ -12,27 +12,27 @@ from __future__ import annotations
 import hashlib
 
 ADJECTIVES = [
-    "çevik", "cesur", "sessiz", "hızlı", "inatçı", "kurnaz", "sakin", "yaman",
-    "gözüpek", "uykucu", "neşeli", "asi", "bilge", "telaşlı", "kibar", "haylaz",
-    "mağrur", "utangaç", "şimşek", "gizemli", "dik", "özgür", "serin", "sıcak",
-    "tuzlu", "rüzgarlı", "yıldızlı", "puslu", "ay", "şafak", "gece", "fırtına",
+    "swift", "brave", "silent", "rapid", "stubborn", "cunning", "calm", "fierce",
+    "fearless", "sleepy", "merry", "rebel", "wise", "restless", "gentle", "rowdy",
+    "proud", "shy", "thunder", "mystic", "bold", "free", "cool", "warm",
+    "salty", "windy", "starry", "misty", "lunar", "dawn", "night", "storm",
 ]
 
 ANIMALS = [
-    "martı", "yunus", "levrek", "kalkan", "orkinos", "vatoz", "ahtapot", "denizatı",
-    "yengeç", "karides", "midye", "mürekkepbalığı", "fok", "balina", "köpekbalığı", "mercan",
-    "albatros", "pelikan", "karabatak", "sumru", "leylek", "kırlangıç", "şahin", "baykuş",
-    "kunduz", "samur", "susamuru", "kaplumbağa", "yılanbalığı", "kefal", "lüfer", "hamsi",
+    "gull", "dolphin", "bass", "turbot", "tuna", "ray", "octopus", "seahorse",
+    "crab", "shrimp", "mussel", "cuttlefish", "seal", "whale", "shark", "coral",
+    "albatross", "pelican", "cormorant", "tern", "stork", "swallow", "hawk", "owl",
+    "beaver", "marten", "otter", "turtle", "eel", "mullet", "bluefish", "anchovy",
 ]
 
 # (minimum earned credits, title, insignia)
 RANKS = [
-    (0.0, "Miço", "·"),
-    (25.0, "Tayfa", "⚓"),
-    (100.0, "Serdümen", "⚓⚓"),
-    (300.0, "Reis", "⚓⚓⚓"),
-    (1000.0, "Kaptan", "★"),
-    (5000.0, "Amiral", "★★"),
+    (0.0, "Cabin Boy", "·"),
+    (25.0, "Deckhand", "⚓"),
+    (100.0, "Helmsman", "⚓⚓"),
+    (300.0, "First Mate", "⚓⚓⚓"),
+    (1000.0, "Captain", "★"),
+    (5000.0, "Admiral", "★★"),
 ]
 
 
@@ -58,8 +58,8 @@ def rank_for(earned: float) -> tuple[str, str, float | None]:
 
 
 BANNER = r"""
-       ~        ~    K E M İ    ~        ~
-            __|__    işlem gücünün açık denizi
+       ~        ~    K E M I    ~        ~
+            __|__    the open sea of compute
         ____\___/____
         \  ⚙  ⚙  ⚙  /
          \__________/

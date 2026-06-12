@@ -107,11 +107,11 @@ async def _cmd_node(args: argparse.Namespace) -> int:
         lan=args.lan,
     )
     await node.start()
-    role = "sağlayıcı" if args.provide else "eş"
+    role = "provider" if args.provide else "peer"
     name = ship_name(node.identity.node_id)
-    print(f"⚓ gemi '{name}' denizde — {role}, port {node.port} (tcp+udp)")
-    print(f"  davet kodu: {make_invite([(_guess_lan_ip(), node.port)], note=name)}")
-    print(f"  katılım:    kemi katil --davet KOD   (veya aynı ağda: kemi katil)")
+    print(f"⚓ ship '{name}' at sea - {role}, port {node.port} (tcp+udp)")
+    print(f"  invite code: {make_invite([(_guess_lan_ip(), node.port)], note=name)}")
+    print("  join with:   kemi join --invite CODE   (or on the same network: kemi join)")
     if args.provide:
         print(f"  price: {node.price} credits/item, sandbox: {node.sandbox}, "
               f"tasks: {', '.join(node.supported_tasks)}")
@@ -197,14 +197,14 @@ async def _cmd_run(args: argparse.Namespace) -> int:
             async for event in consumer.stream_generate(items, json.loads(args.params)):
                 if event.get("done"):
                     print()
-                    print(f"\n{len(items)} istem aktı; {event['spent']:.2f} kredi "
-                          f"({event['provider'][:12]} üzerinden)", file=sys.stderr)
+                    print(f"\n{len(items)} prompt(s) streamed; {event['spent']:.2f} "
+                          f"credits via {ship_name(event['provider'])}", file=sys.stderr)
                     break
                 if event["item"] != current:
                     if current >= 0:
                         print()
                     current = event["item"]
-                    print(f"--- istem {current + 1} ---")
+                    print(f"--- prompt {current + 1} ---")
                 print(event["token"], end="", flush=True)
             await asyncio.sleep(0.5)
             return 0
@@ -285,7 +285,7 @@ async def _cmd_status(args: argparse.Namespace) -> int:
 
 async def _cmd_id(args: argparse.Namespace) -> int:
     identity = Identity.load_or_create(args.identity)
-    print(f"gemi:     {ship_name(identity.node_id)}")
+    print(f"ship:     {ship_name(identity.node_id)}")
     earned = 0.0
     ledger_path = Path(DEFAULT_LEDGER_PATH).expanduser()
     if ledger_path.exists():
@@ -295,70 +295,70 @@ async def _cmd_id(args: argparse.Namespace) -> int:
         earned = ledger.total_earned(identity.node_id)
         ledger.close()
     title, insignia, nxt = rank_for(earned)
-    progress = f" — sonraki rütbe {nxt:.0f} kredide" if nxt is not None else ""
-    print(f"rütbe:    {insignia} {title} ({earned:.2f} kredi kazanıldı{progress})")
+    progress = f" - next rank at {nxt:.0f}" if nxt is not None else ""
+    print(f"rank:     {insignia} {title} ({earned:.2f} credits earned{progress})")
     print(f"node_id:  {identity.node_id}")
     print(f"pubkey:   {identity.public_key_hex}")
     print(f"pow:      nonce={identity.pow_nonce}")
     return 0
 
 
-async def _cmd_davet(args: argparse.Namespace) -> int:
+async def _cmd_invite(args: argparse.Namespace) -> int:
     code = make_invite(args.peer, note=args.note or "")
-    print("Davet kodun hazır — paylaşması güvenlidir (sır içermez):\n")
+    print("Your invite code is ready - safe to share anywhere (contains no secrets):\n")
     print(f"  {code}\n")
-    print("Arkadaşın tek komutla filona katılır:")
-    print(f"  kemi katil --davet {code[:24]}…")
+    print("A friend joins your fleet with a single command:")
+    print(f"  kemi join --invite {code[:24]}…")
     return 0
 
 
-async def _cmd_katil(args: argparse.Namespace) -> int:
+async def _cmd_join(args: argparse.Namespace) -> int:
     """The 60-second onboarding wizard."""
     print(BANNER)
     identity = Identity.load_or_create(args.identity)
     name = ship_name(identity.node_id)
-    print(f"  Gemin: {name}   (kimlik {identity.short_id}…)")
+    print(f"  Your ship: {name}   (identity {identity.short_id}…)")
 
     peers: list[tuple[str, int]] = list(args.peer or [])
-    if args.davet:
+    if args.invite:
         try:
-            info = parse_invite(args.davet)
+            info = parse_invite(args.invite)
         except InviteError as exc:
-            print(f"  hata: {exc}", file=sys.stderr)
+            print(f"  error: {exc}", file=sys.stderr)
             return 2
         peers.extend(info["peers"])
         if info["note"]:
-            print(f"  Davet: '{info['note']}' filosuna")
+            print(f"  Invited to fleet: '{info['note']}'")
     if not peers:
         from . import lan
 
-        print("  Aynı ağda filo aranıyor (LAN keşfi)…")
+        print("  Scanning the local network for a fleet (LAN discovery)…")
         peers = await lan.discover(identity.node_id, timeout=2.0)
         if peers:
-            print(f"  {len(peers)} gemi bulundu — katılınıyor!")
+            print(f"  Found {len(peers)} ship(s) - joining!")
         else:
-            print("  Yakında filo yok: İLK GEMİ SENSİN. Yeni filo kuruluyor…")
+            print("  No fleet nearby: YOU ARE THE FIRST SHIP. Founding a new fleet…")
 
-    provide = args.paylas
-    if not provide and not args.izle and sys.stdin.isatty():
+    provide = args.share
+    if not provide and not args.watch and sys.stdin.isatty():
         answer = await asyncio.to_thread(
-            input, "  İşlem gücünü paylaşıp kredi kazanmak ister misin? [E/h] ")
+            input, "  Share your compute and earn credits? [Y/n] ")
         provide = answer.strip().lower() in ("", "e", "evet", "y", "yes")
 
     node = _make_node(args, host="0.0.0.0", port=args.port, provide=provide,
-                      price=args.fiyat, lan=True)
+                      price=args.price, lan=True)
     node.bootstrap_peers.extend(p for p in peers if p not in node.bootstrap_peers)
     await node.start()
 
     earned = node.ledger.total_earned(identity.node_id)
     title, insignia, _ = rank_for(earned)
     balance = node.ledger.balance(identity.node_id)
-    print(f"\n  ⚓ '{name}' denizde! rütbe: {insignia} {title}, "
-          f"kasa: {balance:.2f} kredi, port: {node.port}")
+    print(f"\n  ⚓ '{name}' is at sea! rank: {insignia} {title}, "
+          f"hold: {balance:.2f} credits, port: {node.port}")
     if provide:
-        print(f"  İşlem gücün kirada: {node.price} kredi/iş "
+        print(f"  Your compute is for hire: {node.price} credits/item "
               f"({', '.join(node.supported_tasks)})")
-    print(f"  Davet kodun: {make_invite([(_guess_lan_ip(), node.port)], note=name)}")
+    print(f"  Your invite code: {make_invite([(_guess_lan_ip(), node.port)], note=name)}")
 
     ui = None
     if args.ui:
@@ -366,8 +366,8 @@ async def _cmd_katil(args: argparse.Namespace) -> int:
 
         ui = WebUI(node, port=args.ui)
         await ui.start()
-        print(f"  Canlı panel: {ui.url}")
-    print("\n  (Durdurmak için Ctrl+C)")
+        print(f"  Live dashboard: {ui.url}")
+    print("\n  (Ctrl+C to stop)")
     try:
         await node.serve_forever()
     except asyncio.CancelledError:
@@ -379,10 +379,10 @@ async def _cmd_katil(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _cmd_ogren(args: argparse.Namespace) -> int:
+async def _cmd_learn(args: argparse.Namespace) -> int:
     from .tutorial import run_tutorial
 
-    return await run_tutorial(fast=args.hizli)
+    return await run_tutorial(fast=args.fast)
 
 
 async def _cmd_demo(args: argparse.Namespace) -> int:
@@ -394,44 +394,45 @@ async def _cmd_demo(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kemi",
-        description="Kemi: merkeziyetsiz P2P islem gucu paylasim agi",
+        description="Kemi: the decentralised peer-to-peer compute sharing network",
     )
     parser.add_argument("--version", action="version", version=f"kemi {__version__}")
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("katil", aliases=["join", "katıl"],
-                       help="60 saniyede filoya katıl (sihirbaz)")
-    p.add_argument("--davet", default=None, metavar="KOD",
-                   help="bir arkadaşının davet kodu")
+    p = sub.add_parser("join", aliases=["katil", "katıl"],
+                       help="join a fleet in 60 seconds (wizard)")
+    p.add_argument("--invite", "--davet", dest="invite", default=None,
+                   metavar="CODE", help="a friend's invite code")
     p.add_argument("--peer", type=_parse_endpoint, action="append", default=[],
-                   metavar="HOST:PORT", help="bilinen bir eş (davet yerine)")
-    p.add_argument("--paylas", action="store_true",
-                   help="işlem gücünü sormadan paylaş")
-    p.add_argument("--izle", action="store_true",
-                   help="paylaşma; yalnızca izleyici/tüketici ol")
-    p.add_argument("--fiyat", type=float, default=1.0, help="kredi/iş fiyatın")
+                   metavar="HOST:PORT", help="a known peer (instead of an invite)")
+    p.add_argument("--share", "--paylas", dest="share", action="store_true",
+                   help="share compute without being asked")
+    p.add_argument("--watch", "--izle", dest="watch", action="store_true",
+                   help="don't share; observe/consume only")
+    p.add_argument("--price", "--fiyat", dest="price", type=float, default=1.0,
+                   help="your credits-per-item price")
     p.add_argument("--port", type=int, default=7700)
     p.add_argument("--ui", type=int, default=8080, metavar="PORT",
-                   help="canlı panel portu (0 = panel yok)")
+                   help="live dashboard port (0 = no dashboard)")
     p.add_argument("--identity", default=DEFAULT_IDENTITY_PATH)
     p.add_argument("--ledger", default=DEFAULT_LEDGER_PATH)
     p.add_argument("--reputation", default=DEFAULT_REPUTATION_PATH)
-    p.set_defaults(func=_cmd_katil)
+    p.set_defaults(func=_cmd_join)
 
-    p = sub.add_parser("ogren", aliases=["learn", "öğren"],
-                       help="3 dakikalık etkileşimli tur: canlı filoyla öğren")
-    p.add_argument("--hizli", action="store_true",
-                   help="beklemeden baştan sona çalıştır")
-    p.set_defaults(func=_cmd_ogren)
+    p = sub.add_parser("learn", aliases=["ogren", "öğren"],
+                       help="3-minute interactive tour on a live fleet")
+    p.add_argument("--fast", "--hizli", dest="fast", action="store_true",
+                   help="run start to finish without pausing")
+    p.set_defaults(func=_cmd_learn)
 
-    p = sub.add_parser("davet", aliases=["invite"],
-                       help="filona davet kodu üret")
+    p = sub.add_parser("invite", aliases=["davet"],
+                       help="mint an invite code for your fleet")
     p.add_argument("--peer", type=_parse_endpoint, action="append", required=True,
-                   metavar="HOST:PORT", help="davet edilenlerin bağlanacağı eş(ler)")
-    p.add_argument("--note", "--not", dest="note", default=None,
-                   help="davete kısa bir not (örn. filo adı)")
-    p.set_defaults(func=_cmd_davet)
+                   metavar="HOST:PORT", help="peer(s) invitees will connect through")
+    p.add_argument("--note", default=None,
+                   help="short note for the invite (e.g. fleet name)")
+    p.set_defaults(func=_cmd_invite)
 
     p = sub.add_parser("node", help="run a peer (optionally providing compute)")
     _add_common(p, peers_required=False)
@@ -455,19 +456,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ui-host", default="127.0.0.1",
                    help="dashboard bind address (default: localhost only)")
     p.add_argument("--lan", action="store_true",
-                   help="aynı yerel ağdaki gemileri otomatik bul/bulun")
+                   help="auto-discover ships on the local network")
     p.set_defaults(func=_cmd_node)
 
-    p = sub.add_parser("providers", aliases=["filo"], help="list discoverable providers / filoyu göster")
+    p = sub.add_parser("providers", aliases=["fleet", "filo"], help="list discoverable providers")
     _add_common(p)
     p.add_argument("--task", default=None, help="only providers offering this task")
     p.set_defaults(func=_cmd_providers)
 
-    p = sub.add_parser("balance", aliases=["bakiye", "kasa"], help="show credit balance / kasandaki kredi")
+    p = sub.add_parser("balance", aliases=["bakiye"], help="show credit balance")
     _add_common(p)
     p.set_defaults(func=_cmd_balance)
 
-    p = sub.add_parser("run", aliases=["calistir", "çalıştır"], help="submit a job / filoya iş ver")
+    p = sub.add_parser("run", aliases=["calistir"], help="submit a job to the fleet")
     _add_common(p)
     p.add_argument("--task", required=True, help="task name, e.g. hash.sha256 or ai.generate")
     p.add_argument("--input", required=True, help="JSON array of items, or - for stdin")
@@ -488,12 +489,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output", default=None, help="write results to this file")
     p.set_defaults(func=_cmd_pipeline)
 
-    p = sub.add_parser("status", aliases=["durum"], help="peer health / gemilerin durumu")
+    p = sub.add_parser("status", aliases=["durum"], help="query the health of one or more peers")
     p.add_argument("--peer", type=_parse_endpoint, action="append", required=True,
                    metavar="HOST:PORT")
     p.set_defaults(func=_cmd_status)
 
-    p = sub.add_parser("id", help="show (or mint) this machine's identity")
+    p = sub.add_parser("id", aliases=["ship", "kimlik"],
+                       help="show (or mint) this machine's ship identity")
     p.add_argument("--identity", default=DEFAULT_IDENTITY_PATH)
     p.set_defaults(func=_cmd_id)
 

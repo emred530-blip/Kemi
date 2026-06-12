@@ -1,9 +1,9 @@
 """Interactive tutorial: learn Kemi by sailing a real (local) fleet.
 
-``kemi ogren`` walks a newcomer through the whole idea in ~3 minutes with a
+``kemi learn`` walks a newcomer through the whole idea in ~3 minutes with a
 live in-process swarm - identity, discovery, paying for compute, streaming
-AI and ranks - in plain Turkish. ``--hizli`` skips the keypresses so the
-tour can run unattended (and be tested).
+AI and ranks. ``--fast`` skips the keypresses so the tour can run
+unattended (and be tested).
 """
 
 from __future__ import annotations
@@ -24,29 +24,29 @@ def _say(text: str = "") -> None:
 async def _pause(fast: bool) -> None:
     if fast:
         return
-    await asyncio.to_thread(input, "\n  [devam etmek için Enter] ")
+    await asyncio.to_thread(input, "\n  [press Enter to continue] ")
     print()
 
 
 async def run_tutorial(fast: bool = False) -> int:
     _say(BANNER)
-    _say("  Hoş geldin! Bu 5 adımlık tur, Kemi'yi çalışan gerçek bir filo")
-    _say("  üzerinde öğretir. Her şey şu an bilgisayarında, yerel olarak olacak.")
+    _say("  Welcome aboard! This 5-step tour teaches Kemi on a real, working")
+    _say("  fleet - everything happens locally on your machine, right now.")
     await _pause(fast)
 
-    # ------------------------------------------------------------- 1: kimlik
-    _say("ADIM 1/5 — Kimliğin: gemin")
+    # ------------------------------------------------------------ 1: identity
+    _say("STEP 1/5 — Your identity: your ship")
     identity = Identity.create()
     name = ship_name(identity.node_id)
-    _say(f"  Sana bir Ed25519 anahtar çifti üretildi ve ufak bir 'proof-of-work'")
-    _say(f"  çözüldü (kimlik basmak bedava olmasın diye - Sybil koruması).")
-    _say(f"  Gemin:    {name}")
-    _say(f"  Kimliğin: {identity.node_id[:24]}… (gemi adı bundan türetilir)")
-    _say(f"  Her yeni gemi kasasında 100 kredi ile denize iner.")
+    _say("  An Ed25519 keypair was generated for you, plus a small proof-of-work")
+    _say("  (minting identities must not be free - that is the Sybil defence).")
+    _say(f"  Your ship:  {name}")
+    _say(f"  Your id:    {identity.node_id[:24]}… (the ship name derives from it)")
+    _say("  Every new ship launches with 100 credits in its hold.")
     await _pause(fast)
 
-    # ------------------------------------------------------------- 2: filo
-    _say("ADIM 2/5 — Filo kuruluyor (merkez yok!)")
+    # ------------------------------------------------------------ 2: fleet
+    _say("STEP 2/5 — Launching a fleet (no centre!)")
     bootstrap = PeerNode(Identity.create(), host="127.0.0.1", port=0)
     await bootstrap.start()
     peers = [("127.0.0.1", bootstrap.port)]
@@ -59,65 +59,65 @@ async def run_tutorial(fast: bool = False) -> int:
     my_node = PeerNode(identity, host="127.0.0.1", port=0, bootstrap=peers)
     await my_node.start()
     consumer = Consumer(my_node)
-    _say("  3 gemi denize indi ve Kademlia DHT üzerinden birbirini buldu:")
-    for node, role in ((bootstrap, "sıradan eş"), (p1, "sağlayıcı, 0.5 kr/iş"),
-                       (p2, "sağlayıcı, 1.0 kr/iş")):
+    _say("  3 ships set sail and found each other over the Kademlia DHT:")
+    for node, role in ((bootstrap, "ordinary peer"), (p1, "provider, 0.5 cr/item"),
+                       (p2, "provider, 1.0 cr/item")):
         _say(f"    ⚓ {ship_name(node.identity.node_id):24s} {role}")
-    _say("  Hiçbiri 'sunucu' değil - ilk kalkan gemi sadece ilk olandır.")
+    _say("  None of them is a 'server' - the first ship is merely first.")
     await _pause(fast)
 
-    # ------------------------------------------------------------- 3: keşif
-    _say("ADIM 3/5 — İşlem gücü pazarı")
+    # ------------------------------------------------------------ 3: market
+    _say("STEP 3/5 — The compute market")
     found = await consumer.list_providers("hash.sha256")
-    _say("  Gemin DHT'ye sordu: 'hash.sha256 koşabilen kim var?'")
+    _say("  Your ship asked the DHT: 'who can run hash.sha256?'")
     for record in found:
-        _say(f"    {ship_name(record['node_id']):24s} {record['price']:.2f} kredi/iş"
-             f"  [e2e şifreli{', akış' if record.get('stream') else ''}]")
-    _say("  Fiyatı sağlayıcı belirler; itibarı yüksek + ucuz olan öne geçer.")
+        _say(f"    {ship_name(record['node_id']):24s} {record['price']:.2f} credits/item"
+             f"  [e2e encrypted{', streaming' if record.get('stream') else ''}]")
+    _say("  Providers set their own price; good reputation + low price wins.")
     await _pause(fast)
 
-    # ------------------------------------------------------------- 4: iş
-    _say("ADIM 4/5 — İlk yükünü taşıt (ve öde)")
-    items = [f"yük-{i}" for i in range(8)]
+    # ------------------------------------------------------------ 4: job
+    _say("STEP 4/5 — Ship your first cargo (and pay for it)")
+    items = [f"cargo-{i}" for i in range(8)]
     report = await consumer.run_job(Job(task="hash.sha256", items=items,
                                         chunk_size=2, redundancy=2))
-    _say(f"  8 öğelik iş 4 parçaya bölündü, redundancy=2 ile her parça iki")
-    _say(f"  AYRI gemide koşup sonuçlar çapraz doğrulandı (çoğunluk kazanır).")
-    _say(f"  Ödeme: parça başına Ed25519-imzalı kredi transferi - escrow yok,")
-    _say(f"  aracı yok. Harcanan: {report.spent:.2f} kredi"
-         f" (hepsi uçtan uca şifreli gitti: {report.encrypted_chunks} parça).")
+    _say("  An 8-item job was split into 4 chunks; redundancy=2 ran every chunk")
+    _say("  on two SEPARATE ships and cross-checked the results (majority wins).")
+    _say("  Payment: a per-chunk Ed25519-signed credit transfer - no escrow,")
+    _say(f"  no middleman. Spent: {report.spent:.2f} credits"
+         f" (all of it end-to-end encrypted: {report.encrypted_chunks} chunks).")
     balance = my_node.ledger.balance(identity.node_id)
-    _say(f"  Yeni bakiyen: {balance:.2f} kredi")
+    _say(f"  Your new balance: {balance:.2f} credits")
     await _pause(fast)
 
-    # ------------------------------------------------------------- 5: AI + rütbe
-    _say("ADIM 5/5 — Canlı yapay zekâ akışı + rütben")
-    _say("  Şimdi bir istem, tokenlar üretildikçe sana akacak:\n")
+    # ------------------------------------------------------------ 5: AI + rank
+    _say("STEP 5/5 — Live AI streaming + your rank")
+    _say("  Now a prompt streams back token by token as it is generated:\n")
     print("    > ", end="", flush=True)
-    async for event in consumer.stream_generate(["Kemi nedir?"],
+    async for event in consumer.stream_generate(["What is Kemi?"],
                                                 {"max_tokens": 10}):
         if event.get("done"):
             print()
             break
         print(event["token"], end="", flush=True)
-    _say("\n  (Gerçek bir modelle aynısı için: Ollama kur, sağlayıcını")
-    _say("   `--ai-backend ollama --ai-model llama3.2` ile başlat.)")
+    _say("\n  (For the same thing with a real model: install Ollama and start")
+    _say("   your provider with `--ai-backend ollama --ai-model llama3.2`.)")
     earned_p1 = p1.ledger.total_earned(p1.identity.node_id)
     title, insignia, nxt = rank_for(earned_p1)
-    _say(f"\n  Gemiler kazandıkça rütbe atlar: {ship_name(p1.identity.node_id)}")
-    _say(f"  şu an {insignia} {title} ({earned_p1:.0f} kredi kazandı"
-         + (f"; {title} üstü için {nxt:.0f} gerek)." if nxt else ")."))
+    _say(f"\n  Ships climb ranks as they earn: {ship_name(p1.identity.node_id)}")
+    _say(f"  is now {insignia} {title} ({earned_p1:.0f} credits earned"
+         + (f"; next rank at {nxt:.0f})." if nxt else ")."))
     await _pause(fast)
 
-    # ------------------------------------------------------------- kapanış
-    invite = make_invite([("BU-MAKINENIN-IP-ADRESI", 7700)], note="örnek")
-    _say("HEPSİ BU! Gerçek denize açılmak için:")
-    _say("  • Filo kur:        kemi node --port 7700 --lan")
-    _say("  • Arkadaş davet et: kemi davet --peer IP:7700")
-    _say(f"      (kod şöyle görünür: {invite[:40]}…)")
-    _say("  • Davetle katıl:   kemi katil --davet KOD")
-    _say("  • Aynı Wi-Fi'daysanız kod bile gerekmez: kemi katil  (LAN keşfi)")
-    _say("  • Canlı panel:     kemi node --ui 8080  →  http://127.0.0.1:8080/")
+    # ------------------------------------------------------------ wrap-up
+    invite = make_invite([("THIS-MACHINES-IP", 7700)], note="example")
+    _say("THAT'S ALL! To set sail for real:")
+    _say("  • Start a fleet:    kemi node --port 7700 --lan")
+    _say("  • Invite a friend:  kemi invite --peer IP:7700")
+    _say(f"      (codes look like: {invite[:40]}…)")
+    _say("  • Join with a code: kemi join --invite CODE")
+    _say("  • Same Wi-Fi? No code needed: kemi join   (LAN discovery)")
+    _say("  • Live dashboard:   kemi node --ui 8080  →  http://127.0.0.1:8080/")
 
     for node in (my_node, p1, p2, bootstrap):
         await node.stop()

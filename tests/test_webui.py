@@ -50,7 +50,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         status, ctype, body = await asyncio.to_thread(_http, "GET", self.base + "/")
         self.assertEqual(status, 200)
         self.assertIn("text/html", ctype)
-        self.assertIn("sürü paneli".encode(), body)
+        self.assertIn(b"fleet panel", body)
 
     async def test_state_api(self):
         # wait for the provider cache to fill

@@ -318,10 +318,10 @@ class WebUI:
 
 
 _PAGE = """<!doctype html>
-<html lang="tr"><head>
+<html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>kemi — sürü paneli</title>
+<title>kemi — fleet panel</title>
 <style>
   :root { --bg:#0d1117; --card:#161b22; --line:#21262d; --fg:#e6edf3;
           --dim:#8b949e; --acc:#3fb950; --warn:#f85149; --link:#58a6ff; }
@@ -360,51 +360,51 @@ _PAGE = """<!doctype html>
   footer { padding:8px 22px 20px; color:var(--dim); font-size:12px; }
 </style></head><body>
 <header>
-  <h1>kemi <span class="dim">sürü paneli</span></h1>
+  <h1>kemi <span class="dim">fleet panel</span></h1>
   <span id="nodeinfo" class="dim"></span>
-  <span class="balance"><span id="balance">…</span> <span class="dim">kredi</span></span>
+  <span class="balance"><span id="balance">…</span> <span class="dim">credits</span></span>
 </header>
 <main>
   <section>
-    <h2>Sağlayıcılar (canlı)</h2>
+    <h2>Providers (live)</h2>
     <table><thead><tr>
-      <th>düğüm</th><th>fiyat</th><th>itibar</th><th>cpu/gpu</th><th>yol</th><th>görevler</th>
+      <th>ship</th><th>price</th><th>rep</th><th>cpu/gpu</th><th>path</th><th>tasks</th>
     </tr></thead><tbody id="providers"></tbody></table>
   </section>
   <section>
-    <h2>İş gönder</h2>
+    <h2>Submit a job</h2>
     <form id="jobform">
       <div class="row">
-        <div><label>görev</label><select id="task"></select></div>
-        <div><label>parça boyutu</label><input id="chunk" type="number" value="4" min="1"></div>
-        <div><label>artıklık</label><input id="redundancy" type="number" value="1" min="1"></div>
+        <div><label>task</label><select id="task"></select></div>
+        <div><label>chunk size</label><input id="chunk" type="number" value="4" min="1"></div>
+        <div><label>redundancy</label><input id="redundancy" type="number" value="1" min="1"></div>
       </div>
-      <div><label>öğeler (JSON dizisi)</label>
-        <textarea id="items">["merhaba", "dünya"]</textarea></div>
-      <div><label>parametreler (JSON nesnesi)</label>
+      <div><label>items (JSON array)</label>
+        <textarea id="items">["hello", "world"]</textarea></div>
+      <div><label>params (JSON object)</label>
         <input id="params" value="{}"></div>
-      <button type="submit">sürüye gönder</button>
+      <button type="submit">send to the fleet</button>
       <div id="jobmsg"></div>
     </form>
     <table><thead><tr>
-      <th>iş</th><th>görev</th><th>öğe</th><th>durum</th><th>maliyet</th><th>sonuç</th>
+      <th>job</th><th>task</th><th>items</th><th>status</th><th>cost</th><th>result</th>
     </tr></thead><tbody id="jobs"></tbody></table>
   </section>
   <section>
-    <h2>Defter (son transferler)</h2>
+    <h2>Ledger (latest transfers)</h2>
     <svg id="spark" width="100%" height="48" viewBox="0 0 400 48"
          preserveAspectRatio="none" style="display:block;margin-bottom:10px">
       <polyline id="sparkline" fill="none" stroke="#3fb950" stroke-width="1.5"/>
     </svg>
     <table><thead><tr>
-      <th>kimden</th><th>kime</th><th>tutar</th><th>ne zaman</th>
+      <th>from</th><th>to</th><th>amount</th><th>when</th>
     </tr></thead><tbody id="txs"></tbody></table>
     <div id="flagged"></div>
   </section>
   <section>
-    <h2>İtibar (bu düğümün gözünden)</h2>
+    <h2>Reputation (as this node sees it)</h2>
     <table><thead><tr>
-      <th>düğüm</th><th>puan</th><th>iyi</th><th>kötü</th><th>olay</th>
+      <th>ship</th><th>score</th><th>good</th><th>bad</th><th>events</th>
     </tr></thead><tbody id="reputation"></tbody></table>
   </section>
 </main>
@@ -415,28 +415,28 @@ const esc = (v) => String(v).replace(/[&<>"]/g,
   (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const short = (id) => esc(String(id).slice(0, 12));
 const ago = (ts, now) => { const d = Math.max(0, now - ts);
-  return d < 60 ? Math.round(d) + ' sn' : Math.round(d / 60) + ' dk'; };
+  return d < 60 ? Math.round(d) + 's' : Math.round(d / 60) + 'm'; };
 
 let knownTasks = [];
 
 function render(s) {
   $('#balance').textContent = s.balance.toFixed(2);
   $('#nodeinfo').textContent = `⚓ ${s.node.name} · ${s.node.rank} · port ${s.node.port}` +
-    (s.node.provide ? ` · sağlayıcı (${s.node.price} cr/öğe)` : ' · eş') +
-    (s.node.relayed ? ' · relay üzerinden' : '');
-  $('#footer').textContent = `kemi v${s.version} · defter: ${s.ledger.txs} işlem · ` +
-    `DHT: ${s.dht_contacts} kontak · her 2 sn'de yenilenir`;
+    (s.node.provide ? ` · provider (${s.node.price} cr/item)` : ' · peer') +
+    (s.node.relayed ? ' · via relay' : '');
+  $('#footer').textContent = `kemi v${s.version} · ledger: ${s.ledger.txs} txs · ` +
+    `DHT: ${s.dht_contacts} contacts · refreshes every 2s`;
 
   $('#providers').innerHTML = s.providers.map(p => `<tr>
     <td title="${esc(p.id)}">⚓ ${esc(p.name || short(p.id))}</td>
     <td>${p.price.toFixed(2)}</td>
     <td class="${p.rep >= 0.5 ? 'ok' : 'bad'}">${p.rep.toFixed(2)}</td>
     <td>${p.cpu ?? '?'} / ${p.gpus}</td>
-    <td>${p.relay ? '<span class="tag">relay</span>' : '<span class="tag">direkt</span>'}` +
+    <td>${p.relay ? '<span class="tag">relay</span>' : '<span class="tag">direct</span>'}` +
       `${p.e2e ? '<span class="tag ok">e2e</span>' : ''}` +
-      `${p.stream ? '<span class="tag lnk">akış</span>' : ''}</td>
+      `${p.stream ? '<span class="tag lnk">stream</span>' : ''}</td>
     <td>${p.tasks.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</td>
-  </tr>`).join('') || '<tr><td colspan="6" class="dim">sağlayıcı keşfedilmedi…</td></tr>';
+  </tr>`).join('') || '<tr><td colspan="6" class="dim">no providers discovered yet…</td></tr>';
 
   if (JSON.stringify(knownTasks) !== JSON.stringify(s.known_tasks)) {
     knownTasks = s.known_tasks;
@@ -449,7 +449,7 @@ function render(s) {
     else if (j.status === 'running' && j.partial)
       detail = `<span class="lnk">⚡ ${esc(j.partial.slice(-70))}</span>`;
     else if (j.results)
-      detail = `<a class="lnk" href="/api/job/${esc(j.id)}/results" download>⬇ indir</a> ` +
+      detail = `<a class="lnk" href="/api/job/${esc(j.id)}/results" download>⬇ download</a> ` +
                esc(JSON.stringify(j.results).slice(0, 45)) + '…';
     else detail = '…';
     return `<tr>
@@ -459,7 +459,7 @@ function render(s) {
       <td>${j.spent != null ? j.spent.toFixed(2) : '—'}</td>
       <td class="dim" title="${j.error ? esc(j.error) : ''}">${detail}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="6" class="dim">henüz iş yok</td></tr>';
+  }).join('') || '<tr><td colspan="6" class="dim">no jobs yet</td></tr>';
 
   if (s.history.length > 1) {
     const xs = s.history.map(h => h[0]), ys = s.history.map(h => h[1]);
@@ -476,22 +476,22 @@ function render(s) {
   $('#txs').innerHTML = s.ledger.recent.map(t => `<tr>
     <td title="${esc(t.from)}">${esc(t.from_name || short(t.from))}</td>` +
     `<td title="${esc(t.to)}">${esc(t.to_name || short(t.to))}</td>
-    <td>${t.amount.toFixed(2)}</td><td class="dim">${ago(t.ts, s.now)} önce</td>
-  </tr>`).join('') || '<tr><td colspan="4" class="dim">henüz transfer yok</td></tr>';
+    <td>${t.amount.toFixed(2)}</td><td class="dim">${ago(t.ts, s.now)} ago</td>
+  </tr>`).join('') || '<tr><td colspan="4" class="dim">no transfers yet</td></tr>';
   $('#flagged').innerHTML = s.ledger.flagged.length
-    ? `<p class="bad">⚑ çift harcama kanıtı: ${s.ledger.flagged.map(short).join(', ')}</p>` : '';
+    ? `<p class="bad">⚑ double-spend evidence: ${s.ledger.flagged.map(short).join(', ')}</p>` : '';
 
   const reps = Object.entries(s.reputation);
   $('#reputation').innerHTML = reps.map(([id, r]) => `<tr>
     <td title="${esc(id)}">${esc(r.name || short(id))}</td>
     <td class="${r.score >= 0.5 ? 'ok' : 'bad'}">${r.score.toFixed(2)}</td>
     <td>${r.good}</td><td>${r.bad}</td><td>${r.events}</td>
-  </tr>`).join('') || '<tr><td colspan="5" class="dim">henüz etkileşim yok</td></tr>';
+  </tr>`).join('') || '<tr><td colspan="5" class="dim">no interactions yet</td></tr>';
 }
 
 async function refresh() {
   try { render(await (await fetch('/api/state')).json()); }
-  catch (e) { $('#footer').textContent = 'düğüme ulaşılamıyor…'; }
+  catch (e) { $('#footer').textContent = 'node unreachable…'; }
 }
 
 $('#jobform').addEventListener('submit', async (ev) => {
@@ -508,9 +508,9 @@ $('#jobform').addEventListener('submit', async (ev) => {
     const r = await (await fetch('/api/job',
       { method: 'POST', body: JSON.stringify(spec) })).json();
     msg.className = r.ok ? 'ok' : 'bad';
-    msg.textContent = r.ok ? `iş ${r.job} sürüye gönderildi` : `hata: ${r.error}`;
+    msg.textContent = r.ok ? `job ${r.job} sent to the fleet` : `error: ${r.error}`;
     refresh();
-  } catch (e) { msg.className = 'bad'; msg.textContent = 'hata: ' + e.message; }
+  } catch (e) { msg.className = 'bad'; msg.textContent = 'error: ' + e.message; }
 });
 
 refresh();

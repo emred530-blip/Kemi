@@ -1,4 +1,4 @@
-"""Kemi: merkeziyetsiz P2P islem gucu paylasim agi.
+"""Kemi: the decentralised P2P compute sharing network.
 
 A fully decentralised peer-to-peer compute sharing network: Kademlia DHT
 discovery, Ed25519 proof-of-work identities, a gossip-replicated credit
@@ -6,4 +6,4 @@ ledger, redundancy-verified execution and NAT relaying - no tracker, no
 servers, no special roles.
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
