@@ -2,7 +2,7 @@
 
 Kemi, **BitTorrent'in dosya paylaşımına yaptığını işlem gücüne yapan**, tamamen merkeziyetsiz bir eşler arası (P2P) ağdır. Kullanıcılar boştaki CPU/GPU kapasitelerini **kredi karşılığında kiraya verir**; yapay zekâ çıkarımı (inference) veya başka ağır hesaplamalar yapmak isteyenler bu kredilerle **sürünün (swarm) işlem gücünü kiralar**. Amaç, merkezi veri merkezlerine olan bağımlılığı azaltmaktır.
 
-**v0.2'den beri ağda hiçbir merkezi bileşen yoktur** — tracker yok, defter sunucusu yok, özel rol yok; her katılımcı aynı `kemi node`'u çalıştırır. **v0.3**, tüm iş trafiğini uçtan uca şifreler ve katman-parçalı modeller için pipeline paralelliğini ekler. **v0.4**, sürüyü tarayıcıdan izleyip yönetebileceğiniz gömülü canlı web panelini getirir. **v0.5**, Ollama ile **gerçek LLM çıkarımını**, sürü üzerinden **canlı token akışını (streaming)**, gerçek iş yüklerini ve 25-düğümlü ölçek/churn testlerini ekler.
+**v0.2'den beri ağda hiçbir merkezi bileşen yoktur** — tracker yok, defter sunucusu yok, özel rol yok; her katılımcı aynı `kemi node`'u çalıştırır. **v0.3**, tüm iş trafiğini uçtan uca şifreler ve katman-parçalı modeller için pipeline paralelliğini ekler. **v0.4**, sürüyü tarayıcıdan izleyip yönetebileceğiniz gömülü canlı web panelini getirir. **v0.5**, Ollama ile **gerçek LLM çıkarımını**, sürü üzerinden **canlı token akışını (streaming)**, gerçek iş yüklerini ve 25-düğümlü ölçek/churn testlerini ekler. **v0.6**, tanık (witness) çekirdeğiyle çift harcamayı **anlık olarak engeller** ve akışı relay üzerinden NAT'lı sağlayıcılara da taşır.
 
 ```
               ╭────────────────  KEŞİF: Kademlia DHT (UDP)  ────────────────╮
@@ -29,7 +29,7 @@ Kemi, **BitTorrent'in dosya paylaşımına yaptığını işlem gücüne yapan**
 | **Eş keşfi** | Kademlia DHT (BitTorrent'in trackersız modu, BEP 5 ile aynı yaklaşım). Sağlayıcılar imzalı kayıtlarını görev başına türetilen anahtarların altında, XOR-en-yakın K düğümde yayımlar; kayıtlar TTL ile kendiliğinden eskir. Ağa katılmak için herhangi bir çalışan eş yeterlidir. |
 | **Kimlik** | Ed25519 anahtar çifti. `node_id = sha256(pubkey ‖ nonce)` ve baştan N biti sıfır olmak zorunda: kimlik basmak **proof-of-work** gerektirir, bu da Sybil saldırılarını ve bedava-kredi (faucet) istismarını pahalılaştırır. PyNaCl varsa libsodium, yoksa saf-Python RFC 8032 kullanılır. |
 | **Ödeme** | Escrow/tracker yerine **parça başına Ed25519-imzalı kredi transferi** doğrudan sağlayıcıya verilir. Defter, imzalı işlemlerin *büyüme-tek-yönlü kümesidir* (CRDT): dedikoduyla çoğalır, varış sırasından bağımsız olarak her replika aynı duruma yakınsar. |
-| **Çift harcama** | Her gönderici işlemlerini artan `seq` ile numaralandırır. Aynı `(gönderici, seq)` ile iki farklı işlem = matematiksel kanıt: ikisi de delil olarak saklanır, deterministik olan teki sayılır ve hesap **kalıcı olarak işaretlenir**; dürüst düğümler hizmet vermeyi keser. |
+| **Çift harcama** | İki katman. **Engelleme:** ödeme kabulünden önce sağlayıcı, göndericinin DHT'de deterministik **tanık komitesine** (`sha256("kemi:witness:"+gönderici)` anahtarına en yakın K düğüm) başvurur; komite aynı `(gönderici, seq)` için ilk gördüğü işlemi kilitleyip imzalı makbuz verir, çakışanı kanıtla **veto eder** — yarışan iki ödemeden en fazla biri kazanır. **Tespit:** veto kaçırılsa bile çakışan imzalı işlemler dedikoduda matematiksel kanıttır; deterministik olan teki sayılır, hesap kalıcı işaretlenir. Çekirdek uyarlanabilirdir: küçük sürülerde erişilebilir tanık sayısına iner, hiç tanık yoksa iyimser moda düşer (canlılık asla kaybolmaz). |
 | **Sahte sonuç** | `--redundancy 2+`: her parça birbirinden bağımsız farklı sağlayıcılarda çalışır, sonuç parmak izleri karşılaştırılır, **çoğunluk kazanır**. Kaybedenler yerel itibar cezası yer. |
 | **İtibar** | Her düğüm yalnızca *birinci elden* deneyimden beslenen yerel (öznel) puan tutar — paylaşılan itibar kolay zehirlenir, birinci el deneyim zehirlenemez. Çift harcama kanıtı ise nesneldir ve işlemlerle birlikte kendisi yayılır. |
 | **NAT geçişi** | Her yanıt, isteği yapanın *gözlemlenen* dış adresini geri söyler (STUN'a gerek kalmaz). NAT arkasındaki sağlayıcı, herhangi bir erişilebilir eşe kalıcı bağlantı açar ve görev trafiği oradan **relay** edilir (TURN benzeri). |
@@ -40,7 +40,7 @@ Kemi, **BitTorrent'in dosya paylaşımına yaptığını işlem gücüne yapan**
 
 ### Güven modeli (dürüst özet)
 
-Ödeme parça istekleriyle birlikte gittiği için kötü niyetli bir sağlayıcının çalabileceği tutar **bir parçanın fiyatıyla sınırlıdır** — BitTorrent'in küçük parçalarla riski sınırlaması gibi. Defter anlık kesinlik (finality) yerine **nihai tutarlılık** sunar: hile dedikodu yayılınca kesin olarak yakalanır ve hesap yakılır. İtibar + PoW kimlik maliyeti, tekrarlanan saldırıyı ekonomik olarak anlamsızlaştırır. (Yol haritası: pay-ağırlıklı çekirdek imzalarıyla sert kesinlik.)
+Ödeme parça istekleriyle birlikte gittiği için kötü niyetli bir sağlayıcının çalabileceği tutar **bir parçanın fiyatıyla sınırlıdır** — BitTorrent'in küçük parçalarla riski sınırlaması gibi. Defter anlık kesinlik (finality) yerine **nihai tutarlılık** sunar: hile dedikodu yayılınca kesin olarak yakalanır ve hesap yakılır. İtibar + PoW kimlik maliyeti, tekrarlanan saldırıyı ekonomik olarak anlamsızlaştırır. v0.6'dan itibaren tanık komitesi çift harcamayı çoğu durumda *baştan engeller*; kanıt-ve-işaretleme katmanı, komitenin erişilemediği uç durumlar için güvenlik ağı olarak kalır.
 
 ## Hızlı başlangıç
 
@@ -115,7 +115,7 @@ echo '["P2P ağlar neden önemli?"]' | \
     kemi run --peer ... --task ai.generate --input - --stream
 ```
 
-Akış, ödemenin *önce* alındığı tek yoldur (aksi hâlde tüketici son token'dan sonra kaçabilirdi); maruziyet yine tek parça fiyatıyla sınırlıdır ve akış yapan sağlayıcılar kayıtlarında `stream` rozetini ilan eder. Panel, `ai.generate` işlerinde model çıktısını gerçek zamanlı büyürken gösterir.
+Akış, ödemenin *önce* alındığı tek yoldur (aksi hâlde tüketici son token'dan sonra kaçabilirdi); maruziyet yine tek parça fiyatıyla sınırlıdır ve akış yapan sağlayıcılar kayıtlarında `stream` rozetini ilan eder. **NAT arkasındaki sağlayıcılar da akış yapabilir:** tokenlar relay oturumundan çoklanarak (multiplexed) geçer ve relay yalnızca şifreli metin görür. Panel, `ai.generate` işlerinde model çıktısını gerçek zamanlı büyürken gösterir.
 
 ### Canlı web paneli
 
@@ -171,12 +171,12 @@ Yeni yetenekler `kemi/tasks.py` içine görev kaydederek eklenir; güvenlik sın
 python3 -m unittest discover -s tests -v
 ```
 
-87 test: 25 düğümlü sürü ölçeği, iş ortasında sağlayıcıların yarısının ölmesi (churn), disk üzerinden yeniden başlatma/seq güvenliği, canlı token akışı (tel üzerinde düz metin sızmadığının kanıtıyla), sahte Ollama sunucusuna karşı backend doğrulaması, kripto çapraz-backend birlikte çalışabilirliği (saf-Python NaCl uygulaması libsodium'a karşı bayt-bayt doğrulanır; RFC 7748/8439 test vektörleri), PoW kimlik, DHT depolama/arama, defter yakınsaması ve çift harcama kanıtı, itibar/yasaklama, sandbox, relay üzerinden NAT'lı sağlayıcı, relay'in yalnızca şifreli metin gördüğünün kanıtı, pipeline kompozisyonu ve hileli sağlayıcının çoğunlukla alt edilmesi dahil uçtan uca sürü senaryoları.
+91 test: tanık komitesiyle eşzamanlı çift-harcama yarışının engellenmesi, veto + kanıt akışı, relay üzerinden canlı token akışı, 25 düğümlü sürü ölçeği, iş ortasında sağlayıcıların yarısının ölmesi (churn), disk üzerinden yeniden başlatma/seq güvenliği, canlı token akışı (tel üzerinde düz metin sızmadığının kanıtıyla), sahte Ollama sunucusuna karşı backend doğrulaması, kripto çapraz-backend birlikte çalışabilirliği (saf-Python NaCl uygulaması libsodium'a karşı bayt-bayt doğrulanır; RFC 7748/8439 test vektörleri), PoW kimlik, DHT depolama/arama, defter yakınsaması ve çift harcama kanıtı, itibar/yasaklama, sandbox, relay üzerinden NAT'lı sağlayıcı, relay'in yalnızca şifreli metin gördüğünün kanıtı, pipeline kompozisyonu ve hileli sağlayıcının çoğunlukla alt edilmesi dahil uçtan uca sürü senaryoları.
 
 ## Yol haritası
 
-- **Sert kesinlik:** Pay-ağırlıklı çekirdek (quorum) makbuzlarıyla işlem kesinliği; defterin dönemsel özetlerle (checkpoint) budanması.
+- **Defter budama:** Çoklu kaynaktan doğrulanan dönemsel özetlerle (checkpoint) eski işlemlerin budanması ve hızlı önyükleme.
+- **Tanık komitesinde pay ağırlığı:** Komite üyeliğinin PoW'a ek olarak kazanılmış krediyle ağırlıklandırılması (Sybil direncini artırır).
 - **Tam delik açma:** Relay'e ek olarak UDP hole-punching ile NAT'lar arası doğrudan görev trafiği.
 - **Daha sert yalıtım:** Container/WASM çalıştırıcı, dosya sistemi ve ağ ad alanları, gerçek GPU kotaları.
 - **Gerçek model şeritleri:** `ai.layer`'ın referans uygulamasının yerine gerçek transformer katman gruplarını koyan bir backend (pipeline altyapısı hazır).
-- **Relay üzerinden akış:** Streaming şu an doğrudan bağlantı ister; relay oturumları üzerinden çoklanmış (multiplexed) akış.

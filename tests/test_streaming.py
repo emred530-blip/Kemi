@@ -87,13 +87,19 @@ class StreamingTests(unittest.IsolatedAsyncioTestCase):
         for blob in seen:
             self.assertNotIn(secret_prompt.encode(), blob)
 
-    async def test_relayed_provider_is_not_used_for_streaming(self):
-        await self._spawn(provide=True, price=1.0, force_relay=True)
+    async def test_streaming_through_relay(self):
+        """A NATed provider's tokens flow live through its relay peer."""
+        relayed = await self._spawn(provide=True, price=1.0, force_relay=True)
         await asyncio.sleep(0.2)
+        self.assertIn(relayed.identity.node_id, self.bootstrap._relay_sessions)
+
         consumer = Consumer(await self._spawn())
-        with self.assertRaises(JobError):
-            async for _ in consumer.stream_generate(["selam"]):
-                pass
+        prompt = "relay üzerinden akış"
+        tokens, summary = await self._collect(consumer, [prompt], {"max_tokens": 5})
+        self.assertEqual(tokens[0], MockBackend().generate(prompt, max_tokens=5))
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary["provider"], relayed.identity.node_id)
+        self.assertEqual(summary["spent"], 1.0)
 
     async def test_no_backend_no_stream(self):
         await self._spawn(provide=True, price=1.0, ai_backend=None)

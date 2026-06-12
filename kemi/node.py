@@ -19,6 +19,7 @@ need to address a peer.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -30,7 +31,7 @@ import time
 from typing import Any
 
 from .ai_backends import AIBackend, AIBackendError, load_backend, supports_streaming
-from .crypto import canonical, open_envelope, sign_envelope
+from .crypto import canonical, digest, open_envelope, sign_envelope
 from .dht import DHTNode
 from .e2e import E2EError, derive_box_key, open_sealed, seal
 from .discovery import ANNOUNCE_INTERVAL, announce_provider, make_provider_record
@@ -48,6 +49,19 @@ GOSSIP_FANOUT = 3
 GOSSIP_INTERVAL = 3.0
 RELAY_FORWARD_TIMEOUT = 150.0
 RELAY_RECONNECT_DELAY = 2.0
+
+# Witness committee: before accepting a payment, a provider asks the nodes
+# DHT-closest to sha256("kemi:witness:" + sender) to lock and co-sign the
+# transfer. Two transfers racing the same seq hit the SAME committee, so at
+# most one wins - double-spending is prevented, not merely detected later.
+WITNESS_COUNT = 5          # committee members consulted
+WITNESS_QUORUM = 2         # receipts required (adaptive: capped by reachable)
+WITNESS_TIMEOUT = 3.0
+WITNESS_CACHE_TTL = 30.0
+
+
+def witness_key(sender: str) -> str:
+    return hashlib.sha256(f"kemi:witness:{sender}".encode("utf-8")).hexdigest()
 
 
 def detect_resources() -> dict[str, Any]:
@@ -95,11 +109,15 @@ class _RelaySession:
         self.writer = writer
         self.write_lock = asyncio.Lock()
         self.pending: dict[str, asyncio.Future] = {}
+        self.streams: dict[str, asyncio.Queue] = {}
         self._counter = 0
 
-    async def forward(self, inner: dict[str, Any], timeout: float) -> dict[str, Any]:
+    def _next_id(self) -> str:
         self._counter += 1
-        msg_id = f"{self._counter}"
+        return f"{self._counter}"
+
+    async def forward(self, inner: dict[str, Any], timeout: float) -> dict[str, Any]:
+        msg_id = self._next_id()
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self.pending[msg_id] = future
         try:
@@ -109,10 +127,45 @@ class _RelaySession:
         finally:
             self.pending.pop(msg_id, None)
 
+    async def stream(self, inner: dict[str, Any], timeout: float):
+        """Multiplexed streaming over the persistent connection: yields the
+        NATed peer's event messages for this request until one ends it."""
+        msg_id = self._next_id()
+        queue: asyncio.Queue = asyncio.Queue()
+        self.streams[msg_id] = queue
+        try:
+            async with self.write_lock:
+                await send_message(self.writer,
+                                   {"id": msg_id, "inner": inner, "stream": True})
+            while True:
+                event = await asyncio.wait_for(queue.get(), timeout=timeout)
+                if event is None:
+                    raise ConnectionError("relay session closed mid-stream")
+                yield event
+                if event.get("end"):
+                    return
+        finally:
+            self.streams.pop(msg_id, None)
+
+    def route_reply(self, reply: dict[str, Any]) -> None:
+        msg_id = str(reply.get("id"))
+        payload = reply.get("response")
+        if not isinstance(payload, dict):
+            payload = {"ok": False, "error": "empty_relay_reply", "end": True}
+        queue = self.streams.get(msg_id)
+        if queue is not None:
+            queue.put_nowait(payload)
+            return
+        future = self.pending.get(msg_id)
+        if future is not None and not future.done():
+            future.set_result(payload)
+
     def fail_all(self) -> None:
         for future in self.pending.values():
             if not future.done():
                 future.set_exception(ConnectionError("relay session closed"))
+        for queue in self.streams.values():
+            queue.put_nowait(None)
 
 
 class PeerNode:
@@ -135,6 +188,7 @@ class PeerNode:
         sandbox_mem_mb: int = 512,
         ai_backend: str | AIBackend | None = "mock",
         force_relay: bool = False,
+        witness_enabled: bool = True,
     ):
         self.identity = identity
         self.host = host
@@ -153,6 +207,8 @@ class PeerNode:
         self.sandbox = sandbox
         self.sandbox_mem_mb = sandbox_mem_mb
         self.force_relay = force_relay
+        self.witness_enabled = witness_enabled
+        self._witness_cache: dict[str, tuple[float, list[Any]]] = {}
         self.resources = detect_resources()
         if isinstance(ai_backend, str):
             ai_backend = load_backend(ai_backend)
@@ -256,6 +312,9 @@ class PeerNode:
         if message.get("type") == "task.stream":
             await self._serve_task_stream(message, writer)
             return
+        if message.get("type") == "relay.stream":
+            await self._serve_relay_stream(message, writer)
+            return
         try:
             response = await self._dispatch(message)
         except Exception:
@@ -289,6 +348,8 @@ class PeerNode:
             return ok(txs=txs, cursor=new_cursor)
         if msg_type == "ledger.push":
             return self._on_ledger_push(message)
+        if msg_type == "tx.witness":
+            return self._on_tx_witness(message)
         if msg_type == "relay.forward":
             return await self._on_relay_forward(message)
         if msg_type == "task.execute":
@@ -321,6 +382,106 @@ class PeerNode:
                 log.warning("double-spend evidence recorded against %s",
                             payload.get("from", "")[:12])
         return ok(accepted=accepted)
+
+    # --------------------------------------------------------------- witnessing
+
+    def _on_tx_witness(self, message: dict[str, Any]) -> dict[str, Any]:
+        """Act as a witness: lock the first transfer seen for a (sender, seq)
+        and co-sign it. A conflicting transfer gets the stored evidence back
+        instead of a receipt."""
+        envelope = message.get("tx")
+        if not isinstance(envelope, dict):
+            return error("bad_request")
+        status = self.ledger.add_tx(envelope)
+        if status == "invalid":
+            return error("invalid_tx", "transfer failed validation")
+        payload = open_envelope(envelope) or {}
+        sender = str(payload.get("from", ""))
+        seq = int(payload.get("seq", 0))
+        if status == "conflict":
+            self.reputation.record(sender, "double_spend")
+            self.gossip_tx(envelope)  # spread the evidence
+            tx_id = digest(payload)
+            evidence = [env for env in self.ledger.envelopes_for_seq(sender, seq)
+                        if digest(env.get("payload", {})) != tx_id]
+            return error("conflict", "a different transfer already holds this seq",
+                         ) | {"evidence": evidence[:1]}
+        if status == "new":
+            self.gossip_tx(envelope)
+        receipt = sign_envelope(self.identity.key, {
+            "kind": "receipt",
+            "tx_id": digest(payload),
+            "from": sender,
+            "seq": seq,
+            "witness": self.identity.node_id,
+            "pow_nonce": self.identity.pow_nonce,
+            "ts": round(time.time(), 3),
+        })
+        return ok(receipt=receipt)
+
+    async def _witness_check(self, payment: dict[str, Any],
+                             sender: str) -> tuple[bool, str]:
+        """Ask the sender's witness committee to lock this transfer.
+
+        Adaptive quorum: in small swarms with few reachable witnesses the
+        requirement shrinks (down to optimistic acceptance when alone), so
+        liveness is never lost - but any reachable witness that has seen a
+        conflicting transfer vetoes the payment outright.
+        """
+        if not self.witness_enabled:
+            return True, ""
+        cached = self._witness_cache.get(sender)
+        if cached and cached[0] > time.monotonic():
+            committee = cached[1]
+        else:
+            contacts = await self.dht.lookup(witness_key(sender))
+            committee = [c for c in contacts
+                         if c.node_id not in (sender, self.identity.node_id)]
+            committee = committee[:WITNESS_COUNT]
+            self._witness_cache[sender] = (time.monotonic() + WITNESS_CACHE_TTL,
+                                           committee)
+        if not committee:
+            return True, ""  # alone in the swarm: optimistic fallback
+
+        async def ask(contact) -> dict[str, Any] | None:
+            try:
+                return await request(contact.host, contact.port,
+                                     {"type": "tx.witness", "tx": payment},
+                                     timeout=WITNESS_TIMEOUT)
+            except NETWORK_ERRORS:
+                return None
+
+        responses = await asyncio.gather(*(ask(c) for c in committee))
+        tx_id = digest(open_envelope(payment) or {})
+        receipts = 0
+        for contact, response in zip(committee, responses):
+            if response is None:
+                continue
+            if response.get("ok"):
+                receipt = open_envelope(response.get("receipt") or {})
+                if (
+                    receipt is not None
+                    and receipt.get("kind") == "receipt"
+                    and receipt.get("tx_id") == tx_id
+                    and receipt.get("witness") == contact.node_id
+                    and verify_node_id(contact.node_id,
+                                       response["receipt"].get("pubkey", ""),
+                                       receipt.get("pow_nonce", -1), self.difficulty)
+                ):
+                    receipts += 1
+            elif response.get("error") == "conflict":
+                # Objective evidence: record it, flag the sender, refuse.
+                for evidence in response.get("evidence") or []:
+                    if isinstance(evidence, dict):
+                        self.ledger.add_tx(evidence)
+                        self.gossip_tx(evidence)
+                self.reputation.record(sender, "double_spend")
+                return False, "witness vetoed payment: conflicting transfer exists"
+        reachable = sum(1 for r in responses if r is not None)
+        required = min(WITNESS_QUORUM, reachable) if reachable else 0
+        if receipts >= required:
+            return True, ""
+        return False, f"witness quorum not reached ({receipts}/{required})"
 
     def gossip_tx(self, envelope: dict[str, Any]) -> None:
         """Fire-and-forget push of a transaction to a few random peers."""
@@ -454,6 +615,9 @@ class PeerNode:
         sender, problem = self._validate_payment(payment, expected)
         if problem is not None:
             return error("payment_rejected", problem)
+        witnessed, veto = await self._witness_check(payment, sender)
+        if not witnessed:
+            return error("payment_rejected", veto)
 
         async with self._work_semaphore:
             try:
@@ -516,7 +680,13 @@ class PeerNode:
 
     async def _serve_task_stream(self, message: dict[str, Any],
                                  writer: asyncio.StreamWriter) -> None:
-        """Live token streaming for ai.generate.
+        async def emit(payload: dict[str, Any]) -> None:
+            await send_message(writer, payload)
+
+        await self._stream_task(message, emit)
+
+    async def _stream_task(self, message: dict[str, Any], emit) -> None:
+        """Live token streaming for ai.generate (direct or via relay).
 
         Streaming reverses the usual payment-before-result order: the
         consumer's transfer is applied *before* tokens flow (otherwise it
@@ -526,7 +696,7 @@ class PeerNode:
         async def finish(payload: dict[str, Any]) -> None:
             payload = {**payload, "end": True}
             try:
-                await send_message(writer, payload)
+                await emit(payload)
             except (ConnectionError, OSError):
                 pass
 
@@ -549,6 +719,10 @@ class PeerNode:
         sender, pay_problem = self._validate_payment(message.get("payment"), expected)
         if pay_problem is not None:
             await finish(error("payment_rejected", pay_problem))
+            return
+        witnessed, veto = await self._witness_check(message["payment"], sender)
+        if not witnessed:
+            await finish(error("payment_rejected", veto))
             return
         status = self.ledger.add_tx(message["payment"])
         if status == "invalid":
@@ -593,10 +767,8 @@ class PeerNode:
                     kind, a, b = await asyncio.wait_for(queue.get(), timeout=remaining)
                     if kind == "token":
                         event = {"evt": "token", "item": a, "t": b}
-                        await send_message(
-                            writer,
-                            {"enc": seal(box_key, canonical(event))} if box_key else event,
-                        )
+                        await emit(
+                            {"enc": seal(box_key, canonical(event))} if box_key else event)
                     elif kind == "done":
                         self.reputation.record(sender, "chunk_ok")
                         final = {"evt": "end", "ok": True, "results": a, "charged": expected}
@@ -654,10 +826,7 @@ class PeerNode:
         try:
             await send_message(writer, ok())
             while True:
-                reply = await read_message(reader)
-                future = session.pending.get(str(reply.get("id")))
-                if future is not None and not future.done():
-                    future.set_result(reply.get("response") or error("empty_relay_reply"))
+                session.route_reply(await read_message(reader))
         except (ProtocolError, asyncio.IncompleteReadError, ConnectionError, OSError):
             pass
         finally:
@@ -665,6 +834,29 @@ class PeerNode:
                 del self._relay_sessions[node_id]
             session.fail_all()
             writer.close()
+
+    async def _serve_relay_stream(self, message: dict[str, Any],
+                                  writer: asyncio.StreamWriter) -> None:
+        """Pass a NATed provider's stream through to the consumer verbatim -
+        events are end-to-end sealed, so this relay learns nothing."""
+        session = self._relay_sessions.get(str(message.get("to", "")))
+        inner = message.get("inner")
+        try:
+            if session is None or not isinstance(inner, dict):
+                await send_message(writer, {**error(
+                    "no_relay_session", "target peer is not relaying through us"),
+                    "end": True})
+                return
+            async for event in session.stream(inner, timeout=RELAY_FORWARD_TIMEOUT):
+                await send_message(writer, event)
+        except asyncio.TimeoutError:
+            try:
+                await send_message(writer, {**error("relay_failed", "stream timed out"),
+                                            "end": True})
+            except (ConnectionError, OSError):
+                pass
+        except (ConnectionError, OSError):
+            pass
 
     async def _on_relay_forward(self, message: dict[str, Any]) -> dict[str, Any]:
         session = self._relay_sessions.get(str(message.get("to", "")))
@@ -713,6 +905,17 @@ class PeerNode:
         inner = incoming.get("inner")
         if not isinstance(inner, dict):
             return
+        msg_id = incoming.get("id")
+        if incoming.get("stream") and inner.get("type") == "task.stream":
+            async def emit(payload: dict[str, Any]) -> None:
+                async with lock:
+                    await send_message(writer, {"id": msg_id, "response": payload})
+
+            try:
+                await self._stream_task(inner, emit)
+            except Exception:
+                log.exception("unhandled error in relayed stream")
+            return
         try:
             response = await self._dispatch(inner)
         except Exception:
@@ -720,6 +923,6 @@ class PeerNode:
             response = error("internal_error")
         try:
             async with lock:
-                await send_message(writer, {"id": incoming.get("id"), "response": response})
+                await send_message(writer, {"id": msg_id, "response": response})
         except (ConnectionError, OSError):
             pass

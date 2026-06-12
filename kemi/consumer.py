@@ -362,18 +362,20 @@ class Consumer:
         ``{"item", "token"}`` events as the provider produces them, then one
         final ``{"done": True, "results", "spent", "provider"}`` summary.
 
-        Only direct (non-relayed) providers that advertise streaming are
-        eligible. Failover to another provider happens only before the first
-        token; once tokens have flowed, an interruption is surfaced as a
-        JobError rather than silently regenerating (and re-paying).
+        Works with relayed (NATed) providers too: the stream is multiplexed
+        through their relay peer, which - like everything else on the path -
+        sees only sealed ciphertext. Failover to another provider happens
+        only before the first token; once tokens have flowed, an
+        interruption is surfaced as a JobError rather than silently
+        regenerating (and re-paying).
         """
         if not prompts:
             raise JobError("no prompts to stream")
         params = dict(params or {})
         providers = [p for p in await self.list_providers("ai.generate")
-                     if p.get("stream") and not p.get("relay")]
+                     if p.get("stream")]
         if not providers:
-            raise JobError("no streaming-capable direct providers for ai.generate")
+            raise JobError("no streaming-capable providers for ai.generate")
 
         ledger = self.node.ledger
         my_id = self.node.identity.node_id
@@ -400,11 +402,21 @@ class Consumer:
                 message["items"] = prompts
                 message["params"] = params
 
+            relay = record.get("relay")
+            if relay:
+                target_host, target_port = relay["host"], relay["port"]
+                wire_message: dict[str, Any] = {"type": "relay.stream",
+                                                "to": record["node_id"],
+                                                "inner": message}
+            else:
+                target_host, target_port = record["host"], record["port"]
+                wire_message = message
+
             streamed_any = False
             failed = False
             try:
-                async for raw in stream_request(record["host"], record["port"],
-                                                message, timeout=chunk_timeout):
+                async for raw in stream_request(target_host, target_port,
+                                                wire_message, timeout=chunk_timeout):
                     event = raw
                     if box_key is not None and "enc" in raw:
                         try:

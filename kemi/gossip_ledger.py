@@ -211,6 +211,13 @@ class GossipLedger:
         ).fetchall()
         return [sender for (sender,) in rows]
 
+    def envelopes_for_seq(self, sender: str, seq: int) -> list[dict[str, Any]]:
+        """All stored envelopes for a (sender, seq) - conflict evidence."""
+        rows = self._db.execute(
+            "SELECT envelope FROM txs WHERE sender = ? AND seq = ?", (sender, seq)
+        ).fetchall()
+        return [json.loads(envelope) for (envelope,) in rows]
+
     # -- replication -------------------------------------------------------------
 
     def txs_after(self, cursor: int, limit: int = 500) -> tuple[list[dict[str, Any]], int]:
