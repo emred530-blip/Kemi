@@ -11,6 +11,26 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Kemi Project" }]
 keywords = ["p2p", "distributed-computing", "compute-sharing", "ai-inference", "dht", "kademlia"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Distributed Computing",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Framework :: AsyncIO",
+]
+
+[project.urls]
+Homepage = "https://github.com/emred530-blip/Kemi"
+Repository = "https://github.com/emred530-blip/Kemi"
+Changelog = "https://github.com/emred530-blip/Kemi/blob/main/CHANGELOG.md"
 
 [project.scripts]
 kemi = "kemi.cli:main"

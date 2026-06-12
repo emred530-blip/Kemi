@@ -39,6 +39,10 @@ No required dependencies (Python ≥ 3.10 standard library is enough;
 `pynacl` recommended):
 
 ```bash
+# one-line install (isolated venv + `kemi` on your PATH):
+curl -fsSL https://raw.githubusercontent.com/emred530-blip/Kemi/main/scripts/install.sh | sh
+
+# or from a clone:
 pip install -e .            # for fast signatures: pip install -e ".[crypto]"
 
 kemi join                   # that's it.

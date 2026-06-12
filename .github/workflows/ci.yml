@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install (with fast crypto)
+        run: pip install -e ".[crypto]"
+      - name: Run test suite
+        run: python -m unittest discover -s tests -v
+      - name: Run test suite without PyNaCl (pure-Python crypto fallback)
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: |
+          pip uninstall -y pynacl
+          python -m unittest discover -s tests -v
+      - name: Demo smoke test
+        run: python -m kemi demo
+      - name: Tutorial smoke test
+        run: python -m kemi learn --fast
