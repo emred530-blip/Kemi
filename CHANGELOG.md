@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.0 — Seaworthy
+- DoS protection: per-IP token-bucket rate limits and connection caps on
+  TCP and the DHT (UDP), global connection ceiling, relay-session caps,
+  DHT storage quotas. Limits are per-source: one abuser cannot starve
+  the fleet. Configurable via `Limits`.
+- Ledger checkpointing: deterministic content-hashed snapshots,
+  `prune()` folds history into a baseline (balances, seqs, earnings and
+  double-spend verdicts survive; replayed pre-checkpoint transfers are
+  rejected as stale), and fast bootstrap — new ships adopt a snapshot
+  verified across multiple sources instead of replaying history
+  (`prune_above=` enables automatic pruning).
+- Dashboard chat: talk to the fleet's AI from the browser; replies
+  stream in live with per-reply cost and provider ship.
+- Test suite de-flaked (3 consecutive full green runs) and extended to
+  128 tests.
+
 ## 0.9.0 — Usability
 - High-level Python API: `kemi.connect()` / `Fleet` — run jobs, generate,
   stream tokens, pipelines, balance/rank from three lines of code.

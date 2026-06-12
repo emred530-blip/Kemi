@@ -103,6 +103,35 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(status, 400)
             self.assertFalse(json.loads(body)["ok"])
 
+    async def test_chat_roundtrip(self):
+        spec = json.dumps({"message": "hello fleet"}).encode()
+        status, _, body = await asyncio.to_thread(
+            _http, "POST", self.base + "/api/chat", spec)
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["ok"])
+
+        reply = None
+        for _ in range(80):
+            _, _, body = await asyncio.to_thread(_http, "GET", self.base + "/api/state")
+            chat = json.loads(body)["chat"]
+            fleet_msgs = [m for m in chat["log"] if m["role"] == "fleet"]
+            if fleet_msgs and not chat["busy"]:
+                reply = fleet_msgs[-1]
+                break
+            await asyncio.sleep(0.25)
+        self.assertIsNotNone(reply, "no fleet reply arrived")
+        self.assertTrue(reply["text"])
+        self.assertGreater(reply["cost"], 0)
+        self.assertIn("-", reply["ship"])  # ship name, not hex
+
+        # a second message while idle is accepted; empty ones are not
+        try:
+            status, _, body = await asyncio.to_thread(
+                _http, "POST", self.base + "/api/chat", b'{"message": "  "}')
+        except urllib.error.HTTPError as exc:
+            status, body = exc.code, exc.read()
+        self.assertEqual(status, 400)
+
     async def test_unknown_path_is_404(self):
         try:
             status, _, _ = await asyncio.to_thread(_http, "GET", self.base + "/yok")

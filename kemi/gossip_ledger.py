@@ -68,6 +68,15 @@ class GossipLedger:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS base (
+                node_id TEXT PRIMARY KEY,
+                balance REAL NOT NULL,
+                base_seq INTEGER NOT NULL,
+                earned REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS flagged_base (
+                node_id TEXT PRIMARY KEY
+            );
             """
         )
         self._db.commit()
@@ -81,7 +90,7 @@ class GossipLedger:
         row = self._db.execute(
             "SELECT MAX(seq) FROM txs WHERE sender = ?", (sender,)
         ).fetchone()
-        return (row[0] or 0) + 1
+        return max(row[0] or 0, self._base_seq(sender)) + 1
 
     def reserve_seq(self, node_id: str) -> int:
         """Atomically claim the next seq for our own transfers.
@@ -140,6 +149,10 @@ class GossipLedger:
             or payload["ts"] > time.time() + MAX_CLOCK_SKEW
         ):
             return "invalid"
+        # Pre-checkpoint transfers are already folded into the baseline:
+        # replaying them must not double-count (and cannot conflict).
+        if seq <= self._base_seq(sender):
+            return "stale"
         # The sender's node id must be backed by the envelope's signing key
         # and carry a valid proof-of-work: nobody can spend from an account
         # they do not hold the key for.
@@ -170,7 +183,21 @@ class GossipLedger:
         "                  WHERE sender = t.sender AND seq = t.seq)"
     )
 
+    def _base_row(self, node_id: str) -> tuple[float, int, float]:
+        row = self._db.execute(
+            "SELECT balance, base_seq, earned FROM base WHERE node_id = ?",
+            (node_id,),
+        ).fetchone()
+        return row if row else (GENESIS_CREDITS, 0, 0.0)
+
+    def _base_seq(self, node_id: str) -> int:
+        return self._base_row(node_id)[1]
+
+    def has_base(self) -> bool:
+        return self._db.execute("SELECT 1 FROM base LIMIT 1").fetchone() is not None
+
     def balance(self, node_id: str) -> float:
+        base_balance, _, _ = self._base_row(node_id)
         incoming = self._db.execute(
             f"SELECT COALESCE(SUM(amount), 0) FROM ({self._COUNTED}) WHERE recipient = ?",
             (node_id,),
@@ -179,18 +206,22 @@ class GossipLedger:
             f"SELECT COALESCE(SUM(amount), 0) FROM ({self._COUNTED}) WHERE sender = ?",
             (node_id,),
         ).fetchone()[0]
-        return _round(GENESIS_CREDITS + incoming - outgoing)
+        return _round(base_balance + incoming - outgoing)
 
     def total_earned(self, node_id: str) -> float:
         """Lifetime counted incoming credits - what ranks are made of."""
+        _, _, base_earned = self._base_row(node_id)
         earned = self._db.execute(
             f"SELECT COALESCE(SUM(amount), 0) FROM ({self._COUNTED}) WHERE recipient = ?",
             (node_id,),
         ).fetchone()[0]
-        return _round(earned)
+        return _round(base_earned + earned)
 
     def is_flagged(self, node_id: str) -> bool:
         """True if the account has provably double-spent or is overdrawn."""
+        if self._db.execute("SELECT 1 FROM flagged_base WHERE node_id = ?",
+                            (node_id,)).fetchone():
+            return True
         double_spend = self._db.execute(
             "SELECT 1 FROM txs WHERE sender = ? GROUP BY seq HAVING COUNT(*) > 1 LIMIT 1",
             (node_id,),
@@ -237,3 +268,87 @@ class GossipLedger:
         if not rows:
             return [], cursor
         return [json.loads(envelope) for _, envelope in rows], rows[-1][0]
+
+    # -- checkpointing ---------------------------------------------------------
+
+    def snapshot(self) -> dict[str, Any]:
+        """A deterministic, content-only summary of the ledger state.
+
+        Replicas that have converged on the same transaction set produce a
+        byte-identical snapshot, so its hash can be compared across multiple
+        independent sources before a new ship adopts it (fast bootstrap)
+        and old transactions can be pruned without losing balances, spend
+        sequences, lifetime earnings or double-spend verdicts.
+        """
+        accounts: dict[str, list[float | int]] = {}
+
+        def slot(node_id: str) -> list[float | int]:
+            if node_id not in accounts:
+                balance, seq, earned = self._base_row(node_id)
+                accounts[node_id] = [float(balance), int(seq), float(earned)]
+            return accounts[node_id]
+
+        for node_id, in self._db.execute("SELECT node_id FROM base"):
+            slot(node_id)
+        # Deterministic accumulation order: sorted by tx id, never SQL SUM.
+        rows = self._db.execute(
+            f"SELECT t2.tx_id, t2.sender, t2.seq, t2.recipient, t2.amount "
+            f"FROM txs t2 WHERE t2.tx_id IN (SELECT MIN(tx_id) FROM txs"
+            f"  GROUP BY sender, seq) ORDER BY t2.tx_id"
+        ).fetchall()
+        for _tx_id, sender, seq, recipient, amount in rows:
+            s = slot(sender)
+            s[0] -= amount
+            s[1] = max(s[1], seq)
+            r = slot(recipient)
+            r[0] += amount
+            r[2] += amount
+        flagged = {node_id for (node_id,) in
+                   self._db.execute("SELECT node_id FROM flagged_base")}
+        flagged.update(self.double_spenders())
+        return {
+            "v": 1,
+            "accounts": {nid: [_round(b), int(q), _round(e)]
+                         for nid, (b, q, e) in sorted(accounts.items())},
+            "flagged": sorted(flagged),
+        }
+
+    def adopt_snapshot(self, snap: dict[str, Any]) -> None:
+        """Fast bootstrap: install a snapshot as this empty replica's base."""
+        if self.tx_count() > 0 or self.has_base():
+            raise ValueError("can only adopt a snapshot into an empty ledger")
+        if snap.get("v") != 1 or not isinstance(snap.get("accounts"), dict):
+            raise ValueError("malformed snapshot")
+        for node_id, values in snap["accounts"].items():
+            balance, seq, earned = float(values[0]), int(values[1]), float(values[2])
+            self._db.execute(
+                "INSERT INTO base (node_id, balance, base_seq, earned)"
+                " VALUES (?, ?, ?, ?)", (node_id, balance, seq, earned))
+        for node_id in snap.get("flagged", []):
+            self._db.execute(
+                "INSERT OR IGNORE INTO flagged_base (node_id) VALUES (?)",
+                (str(node_id),))
+        self._db.commit()
+
+    def prune(self) -> int:
+        """Fold all transactions into the baseline and drop their bodies.
+        Balances, seqs, earnings and flags survive; history does not -
+        peers that still need it fetch the snapshot instead. Returns the
+        number of pruned transactions."""
+        snap = self.snapshot()
+        pruned = self.tx_count()
+        self._db.execute("DELETE FROM base")
+        self._db.execute("DELETE FROM flagged_base")
+        self._db.execute("DELETE FROM txs")
+        self._db.commit()
+        # reuse the adoption path for consistency
+        for node_id, values in snap["accounts"].items():
+            self._db.execute(
+                "INSERT INTO base (node_id, balance, base_seq, earned)"
+                " VALUES (?, ?, ?, ?)",
+                (node_id, float(values[0]), int(values[1]), float(values[2])))
+        for node_id in snap["flagged"]:
+            self._db.execute(
+                "INSERT OR IGNORE INTO flagged_base (node_id) VALUES (?)", (node_id,))
+        self._db.commit()
+        return pruned

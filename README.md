@@ -15,7 +15,9 @@ relays. **v0.7** one-command onboarding, invite codes, LAN auto-discovery,
 ship names and ranks. **v0.8 goes global**: English-first everywhere, with
 Turkish command aliases kept on board. **v0.9 is the usability release**: a
 three-line Python library API, `kemi chat` (a streaming AI REPL), `kemi
-doctor` diagnostics and plain-text job input.
+doctor` diagnostics and plain-text job input. **v0.10 is seaworthy**:
+per-IP rate limits and connection caps, ledger checkpointing with fast
+snapshot bootstrap, and chat built into the dashboard.
 
 ```
             ╭───────────────  DISCOVERY: Kademlia DHT (UDP)  ───────────────╮
@@ -103,6 +105,8 @@ listings.
 | **Privacy** | Chunk contents and results are **end-to-end encrypted** between consumer and provider (byte-compatible with NaCl `crypto_box`: X25519 + XSalsa20-Poly1305). Keys derive from the Ed25519 identities both sides already have — no handshake; relays only ever see ciphertext. Without PyNaCl a pure-Python implementation takes over; both produce identical bytes (tested against libsodium). |
 | **Large models** | **Pipeline parallelism**: with `run_pipeline` each stage's output feeds the next stage, so a layer-sharded model can run across providers none of which could host the whole model. Every stage gets the full scheduler treatment (chunking, retries, majority voting, signed payment, encryption). |
 | **GPU** | GPUs are discovered via `nvidia-smi` and advertised in resource records; the `transformers` backend can run on GPU. |
+| **Abuse resistance** | Per-source-IP token buckets on TCP requests and DHT datagrams, per-IP and global connection caps, relay-session quotas and DHT storage limits — one hostile host cannot starve the fleet, and limits never throttle a healthy local swarm. |
+| **Ledger growth** | Deterministic, content-hashed **checkpoints**: `prune()` folds history into a baseline (balances, spend sequences, lifetime earnings and double-spend verdicts survive; pre-checkpoint replays are rejected as stale). New ships **fast-bootstrap** by adopting a snapshot verified across multiple independent sources instead of replaying history. |
 
 ### Trust model (the honest summary)
 
@@ -240,6 +244,8 @@ output growing in real time.
 
 `--ui PORT` gives every node a dependency-free control panel:
 
+- **Chat:** talk to the fleet's AI right in the panel — replies stream in
+  live, each tagged with its cost and the ship that produced it.
 - **Providers (live):** price, reputation score, CPU/GPU, direct/relay path,
   e2e and stream badges — banned/flagged nodes filtered out automatically.
 - **Submit jobs:** pick a task, paste JSON items, set chunk size/redundancy;
@@ -304,7 +310,7 @@ the same way. New capabilities are added by registering tasks in
 python3 -m unittest discover -s tests -v
 ```
 
-115 tests, including: the three-line library API, chat turns with cost and history, doctor diagnostics, cross-backend crypto interoperability (the pure-Python
+128 tests, including: rate-limit and connection-cap enforcement, checkpoint determinism/prune/stale-replay, fast bootstrap from a pruned quorum, dashboard chat, the three-line library API, chat turns with cost and history, doctor diagnostics, cross-backend crypto interoperability (the pure-Python
 NaCl implementation is verified byte-for-byte against libsodium, plus RFC
 7748/8439 vectors), PoW identities, DHT storage/lookup, ledger convergence
 and double-spend proofs, the witness committee blocking a concurrent
@@ -316,8 +322,6 @@ beacon discovery, and the tutorial running end to end.
 
 ## Roadmap
 
-- **Ledger pruning:** periodic checkpoints verified against multiple sources;
-  fast bootstrap for new ships.
 - **Stake-weighted witnesses:** weighting committee membership by earned
   credits on top of PoW (stronger Sybil resistance).
 - **Full hole-punching:** direct NAT-to-NAT task traffic via UDP

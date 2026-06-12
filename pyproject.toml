@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kemi"
-version = "0.9.0"
+version = "0.10.0"
 description = "Kemi: the decentralised peer-to-peer compute sharing network - rent out spare compute, run AI on the fleet"
 readme = "README.md"
 requires-python = ">=3.10"

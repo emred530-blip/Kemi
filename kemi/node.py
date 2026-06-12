@@ -39,6 +39,7 @@ from .gossip_ledger import GossipLedger
 from .identity import POW_DIFFICULTY_BITS, Identity, verify_node_id
 from .protocol import (NETWORK_ERRORS, ProtocolError, error, ok, read_message,
                        request, send_message)
+from .ratelimit import IPGuard, Limits
 from .reputation import ReputationStore
 from .sandbox import UNSANDBOXED_TASKS, SandboxError, run_sandboxed
 from .tasks import BACKEND_REQUIRED, TASKS, TaskError, run_task
@@ -190,6 +191,8 @@ class PeerNode:
         force_relay: bool = False,
         witness_enabled: bool = True,
         lan: bool = False,
+        limits: Limits | None = None,
+        prune_above: int | None = None,
     ):
         self.identity = identity
         self.host = host
@@ -197,9 +200,17 @@ class PeerNode:
         self.bootstrap_peers = bootstrap or []
         self.advertise_host = advertise_host
         self.difficulty = difficulty
+        self.limits = limits or Limits()
+        self.prune_above = prune_above
+        self._tcp_guard = IPGuard(self.limits.per_ip_rate, self.limits.per_ip_burst,
+                                  self.limits.per_ip_connections)
+        self._udp_guard = IPGuard(self.limits.udp_rate, self.limits.udp_burst,
+                                  max_concurrent=1_000_000)
+        self._open_connections = 0
         self.ledger = GossipLedger(ledger_path, difficulty=difficulty)
         self.reputation = ReputationStore(reputation_path)
-        self.dht = DHTNode(identity, host=host, port=port, difficulty=difficulty)
+        self.dht = DHTNode(identity, host=host, port=port, difficulty=difficulty,
+                           guard=self._udp_guard, max_keys=self.limits.dht_max_keys)
 
         self.provide = provide
         self.price = price
@@ -246,6 +257,9 @@ class PeerNode:
             self._lan_beacon = _lan.beacon_payload_of(self)
             await self._lan_beacon.start()
         await self.dht.bootstrap(self.bootstrap_peers)
+        if (self.bootstrap_peers and self.ledger.tx_count() == 0
+                and not self.ledger.has_base()):
+            await self._bootstrap_from_snapshot()
         await self.sync_ledger()
         self._running = True
         self._loops.append(asyncio.create_task(self._gossip_loop()))
@@ -313,6 +327,29 @@ class PeerNode:
 
     async def _handle_client(self, reader: asyncio.StreamReader,
                              writer: asyncio.StreamWriter) -> None:
+        peer = writer.get_extra_info("peername") or ("?", 0)
+        ip = str(peer[0])
+        if self._open_connections >= self.limits.max_connections \
+                or not self._tcp_guard.try_connect(ip):
+            writer.close()  # over capacity: shed load without ceremony
+            return
+        self._open_connections += 1
+        try:
+            await self._guarded_client(ip, reader, writer)
+        finally:
+            self._open_connections -= 1
+            self._tcp_guard.disconnect(ip)
+
+    async def _guarded_client(self, ip: str, reader: asyncio.StreamReader,
+                              writer: asyncio.StreamWriter) -> None:
+        if not self._tcp_guard.allow_request(ip):
+            try:
+                await send_message(writer, error("rate_limited",
+                                                 "slow down, sailor"))
+            except (ConnectionError, OSError):
+                pass
+            writer.close()
+            return
         try:
             message = await asyncio.wait_for(read_message(reader), timeout=60.0)
         except (ProtocolError, asyncio.IncompleteReadError, asyncio.TimeoutError,
@@ -361,6 +398,9 @@ class PeerNode:
             return ok(txs=txs, cursor=new_cursor)
         if msg_type == "ledger.push":
             return self._on_ledger_push(message)
+        if msg_type == "ledger.snapshot":
+            snap = self.ledger.snapshot()
+            return ok(snapshot=snap, hash=digest(snap))
         if msg_type == "tx.witness":
             return self._on_tx_witness(message)
         if msg_type == "relay.forward":
@@ -548,6 +588,51 @@ class PeerNode:
             if contacts:
                 peer = random.choice(contacts)
                 await self._pull_from((peer.host, peer.port))
+            if self.prune_above and self.ledger.tx_count() > self.prune_above:
+                pruned = self.ledger.prune()
+                self._gossip_cursors.clear()  # peers re-sync via snapshots
+                log.info("ledger pruned: %d transactions folded into the baseline",
+                         pruned)
+
+    async def _bootstrap_from_snapshot(self) -> None:
+        """Fast bootstrap: adopt a checkpoint instead of replaying history.
+
+        Snapshots are fetched from several bootstrap peers and adopted only
+        when independently fetched copies agree on the content hash; with a
+        single reachable source we still adopt (there is nobody else to
+        ask) but say so out loud.
+        """
+        responses: dict[str, tuple[dict[str, Any], int]] = {}
+        for peer in self.bootstrap_peers[:3]:
+            try:
+                reply = await request(peer[0], peer[1],
+                                      {"type": "ledger.snapshot"}, timeout=10.0)
+            except NETWORK_ERRORS:
+                continue
+            if not reply.get("ok") or not isinstance(reply.get("snapshot"), dict):
+                continue
+            snap = reply["snapshot"]
+            snap_hash = digest(snap)
+            if snap_hash != reply.get("hash"):
+                continue
+            seen = responses.get(snap_hash)
+            responses[snap_hash] = (snap, (seen[1] if seen else 0) + 1)
+        if not responses:
+            return
+        snap, agreement = max(responses.values(), key=lambda pair: pair[1])
+        if not snap.get("accounts"):
+            return  # an empty fleet: nothing worth adopting
+        if agreement < 2 and len(responses) + agreement > 2:
+            log.warning("snapshot sources disagree; adopting the majority hash")
+        if agreement < 2:
+            log.warning("adopting a single-source ledger snapshot "
+                        "(only one bootstrap peer reachable)")
+        try:
+            self.ledger.adopt_snapshot(snap)
+            log.info("fast bootstrap: adopted snapshot of %d accounts",
+                     len(snap["accounts"]))
+        except ValueError as exc:
+            log.warning("snapshot adoption failed: %s", exc)
 
     # ---------------------------------------------------------------- provider
 
@@ -815,6 +900,18 @@ class PeerNode:
     async def _serve_relay_session(self, message: dict[str, Any],
                                    reader: asyncio.StreamReader,
                                    writer: asyncio.StreamWriter) -> None:
+        ip = str((writer.get_extra_info("peername") or ("?",))[0])
+        if (len(self._relay_sessions) >= self.limits.max_relay_sessions
+                or sum(1 for s in self._relay_sessions.values()
+                       if getattr(s, "ip", None) == ip)
+                >= self.limits.per_ip_relay_sessions):
+            try:
+                await send_message(writer, error("relay_full",
+                                                 "no relay capacity for you here"))
+            except (ConnectionError, OSError):
+                pass
+            writer.close()
+            return
         payload = open_envelope(message.get("envelope") or {})
         now = time.time()
         if (
@@ -834,6 +931,7 @@ class PeerNode:
             return
         node_id = payload["node_id"]
         session = _RelaySession(node_id, writer)
+        session.ip = ip  # for per-IP relay caps
         self._relay_sessions[node_id] = session
         log.info("relaying for NATed peer %s", node_id[:12])
         try:

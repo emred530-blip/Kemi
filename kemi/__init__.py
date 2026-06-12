@@ -16,7 +16,7 @@ Quick start as a library::
     asyncio.run(main())
 """
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 from .api import (  # noqa: E402,F401  (public API re-exports)
     Fleet,

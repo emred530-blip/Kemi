@@ -119,11 +119,14 @@ class _Protocol(asyncio.DatagramProtocol):
 
 class DHTNode:
     def __init__(self, identity: Identity, host: str = "0.0.0.0", port: int = 0,
-                 difficulty: int = POW_DIFFICULTY_BITS):
+                 difficulty: int = POW_DIFFICULTY_BITS, guard=None,
+                 max_keys: int = 4096):
         self.identity = identity
         self.host = host
         self.port = port
         self.difficulty = difficulty
+        self.guard = guard          # optional IPGuard: per-IP datagram rate
+        self.max_keys = max_keys
         self.table = RoutingTable(identity.node_id)
         # key -> value_id -> (envelope, expires_at)
         self._storage: dict[str, dict[str, tuple[dict, float]]] = {}
@@ -180,6 +183,8 @@ class DHTNode:
         self._transport.sendto(data, addr)
 
     def _on_datagram(self, message: dict[str, Any], addr: tuple[str, int]) -> None:
+        if self.guard is not None and not self.guard.allow_request(addr[0]):
+            return  # rate-limited source: drop silently
         sender = message.get("from")
         if isinstance(sender, dict):
             node_id = sender.get("id", "")
@@ -255,6 +260,8 @@ class DHTNode:
         ts = payload.get("ts")
         now = time.time()
         if not isinstance(ts, (int, float)) or not (now - MAX_RECORD_AGE < ts < now + 30):
+            return {"type": "store_result", "stored": False}
+        if key not in self._storage and len(self._storage) >= self.max_keys:
             return {"type": "store_result", "stored": False}
         slot = self._storage.setdefault(key, {})
         self._expire(key)

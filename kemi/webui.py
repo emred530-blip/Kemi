@@ -52,6 +52,8 @@ class WebUI:
         self._providers_cache: dict[str, list[dict[str, Any]]] = {}
         self._jobs: dict[str, dict[str, Any]] = {}
         self._history: deque[tuple[float, float]] = deque(maxlen=240)
+        self._chat: dict[str, Any] = {"log": [], "live": "", "busy": False}
+        self._chat_history: list[tuple[str, str]] = []
         self._loops: list[asyncio.Task] = []
 
     # -- lifecycle -----------------------------------------------------------
@@ -160,6 +162,8 @@ class WebUI:
             "jobs": jobs,
             "history": [[round(ts, 1), round(balance, 4)]
                         for ts, balance in self._history],
+            "chat": {"log": self._chat["log"][-30:],
+                     "live": self._chat["live"], "busy": self._chat["busy"]},
         }
 
     # -- job execution -----------------------------------------------------------
@@ -238,6 +242,41 @@ class WebUI:
                 partials[idx] for idx in sorted(partials))[-400:]
         raise JobError("stream ended without a final summary")
 
+    def _submit_chat(self, message: str) -> None:
+        if self._chat["busy"]:
+            raise ValueError("a reply is already streaming; wait for it")
+        message = message.strip()
+        if not message or len(message) > 4000:
+            raise ValueError("message must be 1-4000 characters")
+        self._chat["busy"] = True
+        self._chat["live"] = ""
+        self._chat["log"].append({"role": "you", "text": message})
+        asyncio.ensure_future(self._run_chat_turn(message))
+
+    async def _run_chat_turn(self, message: str) -> None:
+        from .chat import chat_once
+        from .names import ship_name as _ship
+
+        def on_token(token: str) -> None:
+            self._chat["live"] += token
+
+        try:
+            reply, spent, provider = await chat_once(
+                self.consumer, self._chat_history, message, max_tokens=160,
+                on_token=on_token)
+            self._chat["log"].append({"role": "fleet", "text": reply,
+                                      "cost": spent, "ship": _ship(provider)})
+        except JobError as exc:
+            self._chat["log"].append({"role": "error", "text": str(exc)})
+        except Exception as exc:
+            log.exception("dashboard chat turn crashed")
+            self._chat["log"].append({"role": "error",
+                                      "text": f"{type(exc).__name__}: {exc}"})
+        finally:
+            self._chat["live"] = ""
+            self._chat["busy"] = False
+            del self._chat["log"][:-60]
+
     # -- HTTP plumbing --------------------------------------------------------------
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -284,6 +323,13 @@ class WebUI:
                     writer, 200, entry["_full_results"],
                     extra_headers={"Content-Disposition":
                                    f'attachment; filename="kemi-{job_id}.json"'})
+        elif method == "POST" and path == "/api/chat":
+            try:
+                spec = json.loads(body.decode("utf-8"))
+                self._submit_chat(str(spec.get("message", "")))
+                await self._respond(writer, 200, {"ok": True})
+            except (ValueError, json.JSONDecodeError, TypeError) as exc:
+                await self._respond(writer, 400, {"ok": False, "error": str(exc)})
         elif method == "POST" and path == "/api/job":
             try:
                 spec = json.loads(body.decode("utf-8"))
@@ -391,6 +437,14 @@ _PAGE = """<!doctype html>
     </tr></thead><tbody id="jobs"></tbody></table>
   </section>
   <section>
+    <h2>Chat with the fleet</h2>
+    <div id="chatlog" style="max-height:260px;overflow-y:auto;margin-bottom:10px"></div>
+    <form id="chatform" style="grid-template-columns:1fr auto;display:grid;gap:8px">
+      <input id="chatmsg" placeholder="ask the fleet's AI anything…" autocomplete="off">
+      <button type="submit" style="width:auto;padding:7px 14px">send</button>
+    </form>
+  </section>
+  <section>
     <h2>Ledger (latest transfers)</h2>
     <svg id="spark" width="100%" height="48" viewBox="0 0 400 48"
          preserveAspectRatio="none" style="display:block;margin-bottom:10px">
@@ -461,6 +515,22 @@ function render(s) {
     </tr>`;
   }).join('') || '<tr><td colspan="6" class="dim">no jobs yet</td></tr>';
 
+  const chat = s.chat || {log: [], live: '', busy: false};
+  const liveRow = chat.busy
+    ? `<div><span class="lnk">fleet ⚡</span> <span class="dim">${esc(chat.live)}▋</span></div>`
+    : '';
+  $('#chatlog').innerHTML = chat.log.map(m => {
+    if (m.role === 'you') return `<div><span class="ok">you ⚓</span> ${esc(m.text)}</div>`;
+    if (m.role === 'error') return `<div class="bad">⚠ ${esc(m.text)}</div>`;
+    return `<div><span class="lnk">fleet</span> ${esc(m.text)} ` +
+           `<span class="dim">[${(m.cost ?? 0).toFixed(2)} cr · ${esc(m.ship || '')}]</span></div>`;
+  }).join('') + liveRow ||
+    '<div class="dim">no conversation yet - say hello</div>';
+  if (chat.busy || chat.log.length !== window._chatLen) {
+    window._chatLen = chat.log.length;
+    $('#chatlog').scrollTop = $('#chatlog').scrollHeight;
+  }
+
   if (s.history.length > 1) {
     const xs = s.history.map(h => h[0]), ys = s.history.map(h => h[1]);
     const x0 = Math.min(...xs), x1 = Math.max(...xs);
@@ -513,8 +583,18 @@ $('#jobform').addEventListener('submit', async (ev) => {
   } catch (e) { msg.className = 'bad'; msg.textContent = 'error: ' + e.message; }
 });
 
+$('#chatform').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const box = $('#chatmsg');
+  const message = box.value.trim();
+  if (!message) return;
+  box.value = '';
+  await fetch('/api/chat', { method: 'POST', body: JSON.stringify({ message }) });
+  refresh();
+});
+
 refresh();
-setInterval(refresh, 2000);
+setInterval(refresh, 500);
 </script>
 </body></html>
 """
