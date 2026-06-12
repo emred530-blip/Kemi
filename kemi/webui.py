@@ -26,6 +26,7 @@ from typing import Any
 
 from . import __version__
 from .consumer import Consumer, Job, JobError
+from .names import rank_for, ship_name
 from .node import PeerNode
 from .tasks import TASKS
 
@@ -107,6 +108,7 @@ class WebUI:
         provider_rows = [
             {
                 "id": p["node_id"],
+                "name": ship_name(p["node_id"]),
                 "price": p["price"],
                 "host": p.get("host", ""),
                 "port": p.get("port", 0),
@@ -131,6 +133,9 @@ class WebUI:
             "node": {
                 "id": node.identity.node_id,
                 "short": node.identity.short_id,
+                "name": ship_name(node.identity.node_id),
+                "rank": "{1} {0}".format(*rank_for(
+                    node.ledger.total_earned(node.identity.node_id))),
                 "port": node.port,
                 "provide": node.provide,
                 "price": node.price,
@@ -140,13 +145,18 @@ class WebUI:
             "balance": node.ledger.balance(node.identity.node_id),
             "ledger": {
                 "txs": node.ledger.tx_count(),
-                "recent": node.ledger.recent_txs(15),
+                "recent": [
+                    {**tx, "from_name": ship_name(tx["from"]),
+                     "to_name": ship_name(tx["to"])}
+                    for tx in node.ledger.recent_txs(15)
+                ],
                 "flagged": node.ledger.double_spenders(),
             },
             "dht_contacts": len(node.dht.table),
             "known_tasks": sorted(TASKS),
             "providers": provider_rows,
-            "reputation": node.reputation.snapshot(),
+            "reputation": {nid: {**rep, "name": ship_name(nid)}
+                           for nid, rep in node.reputation.snapshot().items()},
             "jobs": jobs,
             "history": [[round(ts, 1), round(balance, 4)]
                         for ts, balance in self._history],
@@ -411,14 +421,14 @@ let knownTasks = [];
 
 function render(s) {
   $('#balance').textContent = s.balance.toFixed(2);
-  $('#nodeinfo').textContent = `düğüm ${s.node.short} · port ${s.node.port}` +
+  $('#nodeinfo').textContent = `⚓ ${s.node.name} · ${s.node.rank} · port ${s.node.port}` +
     (s.node.provide ? ` · sağlayıcı (${s.node.price} cr/öğe)` : ' · eş') +
     (s.node.relayed ? ' · relay üzerinden' : '');
   $('#footer').textContent = `kemi v${s.version} · defter: ${s.ledger.txs} işlem · ` +
     `DHT: ${s.dht_contacts} kontak · her 2 sn'de yenilenir`;
 
   $('#providers').innerHTML = s.providers.map(p => `<tr>
-    <td title="${esc(p.id)}">${short(p.id)}</td>
+    <td title="${esc(p.id)}">⚓ ${esc(p.name || short(p.id))}</td>
     <td>${p.price.toFixed(2)}</td>
     <td class="${p.rep >= 0.5 ? 'ok' : 'bad'}">${p.rep.toFixed(2)}</td>
     <td>${p.cpu ?? '?'} / ${p.gpus}</td>
@@ -464,7 +474,8 @@ function render(s) {
   }
 
   $('#txs').innerHTML = s.ledger.recent.map(t => `<tr>
-    <td>${short(t.from)}</td><td>${short(t.to)}</td>
+    <td title="${esc(t.from)}">${esc(t.from_name || short(t.from))}</td>` +
+    `<td title="${esc(t.to)}">${esc(t.to_name || short(t.to))}</td>
     <td>${t.amount.toFixed(2)}</td><td class="dim">${ago(t.ts, s.now)} önce</td>
   </tr>`).join('') || '<tr><td colspan="4" class="dim">henüz transfer yok</td></tr>';
   $('#flagged').innerHTML = s.ledger.flagged.length
@@ -472,7 +483,7 @@ function render(s) {
 
   const reps = Object.entries(s.reputation);
   $('#reputation').innerHTML = reps.map(([id, r]) => `<tr>
-    <td>${short(id)}</td>
+    <td title="${esc(id)}">${esc(r.name || short(id))}</td>
     <td class="${r.score >= 0.5 ? 'ok' : 'bad'}">${r.score.toFixed(2)}</td>
     <td>${r.good}</td><td>${r.bad}</td><td>${r.events}</td>
   </tr>`).join('') || '<tr><td colspan="5" class="dim">henüz etkileşim yok</td></tr>';

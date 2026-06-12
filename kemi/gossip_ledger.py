@@ -181,6 +181,14 @@ class GossipLedger:
         ).fetchone()[0]
         return _round(GENESIS_CREDITS + incoming - outgoing)
 
+    def total_earned(self, node_id: str) -> float:
+        """Lifetime counted incoming credits - what ranks are made of."""
+        earned = self._db.execute(
+            f"SELECT COALESCE(SUM(amount), 0) FROM ({self._COUNTED}) WHERE recipient = ?",
+            (node_id,),
+        ).fetchone()[0]
+        return _round(earned)
+
     def is_flagged(self, node_id: str) -> bool:
         """True if the account has provably double-spent or is overdrawn."""
         double_spend = self._db.execute(

@@ -189,6 +189,7 @@ class PeerNode:
         ai_backend: str | AIBackend | None = "mock",
         force_relay: bool = False,
         witness_enabled: bool = True,
+        lan: bool = False,
     ):
         self.identity = identity
         self.host = host
@@ -207,6 +208,8 @@ class PeerNode:
         self.sandbox = sandbox
         self.sandbox_mem_mb = sandbox_mem_mb
         self.force_relay = force_relay
+        self.lan = lan
+        self._lan_beacon = None
         self.witness_enabled = witness_enabled
         self._witness_cache: dict[str, tuple[float, list[Any]]] = {}
         self.resources = detect_resources()
@@ -234,6 +237,14 @@ class PeerNode:
 
     async def start(self) -> None:
         await self._bind()
+        if self.lan:
+            from . import lan as _lan
+
+            for peer in await _lan.discover(self.identity.node_id, timeout=1.2):
+                if peer not in self.bootstrap_peers:
+                    self.bootstrap_peers.append(peer)
+            self._lan_beacon = _lan.beacon_payload_of(self)
+            await self._lan_beacon.start()
         await self.dht.bootstrap(self.bootstrap_peers)
         await self.sync_ledger()
         self._running = True
@@ -270,6 +281,8 @@ class PeerNode:
     async def stop(self) -> None:
         self._running = False
         self._closed = True
+        if self._lan_beacon is not None:
+            await self._lan_beacon.stop()
         for loop_task in self._loops:
             loop_task.cancel()
         for loop_task in self._loops:

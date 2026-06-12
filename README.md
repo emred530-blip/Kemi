@@ -2,7 +2,7 @@
 
 Kemi, **BitTorrent'in dosya paylaşımına yaptığını işlem gücüne yapan**, tamamen merkeziyetsiz bir eşler arası (P2P) ağdır. Kullanıcılar boştaki CPU/GPU kapasitelerini **kredi karşılığında kiraya verir**; yapay zekâ çıkarımı (inference) veya başka ağır hesaplamalar yapmak isteyenler bu kredilerle **sürünün (swarm) işlem gücünü kiralar**. Amaç, merkezi veri merkezlerine olan bağımlılığı azaltmaktır.
 
-**v0.2'den beri ağda hiçbir merkezi bileşen yoktur** — tracker yok, defter sunucusu yok, özel rol yok; her katılımcı aynı `kemi node`'u çalıştırır. **v0.3**, tüm iş trafiğini uçtan uca şifreler ve katman-parçalı modeller için pipeline paralelliğini ekler. **v0.4**, sürüyü tarayıcıdan izleyip yönetebileceğiniz gömülü canlı web panelini getirir. **v0.5**, Ollama ile **gerçek LLM çıkarımını**, sürü üzerinden **canlı token akışını (streaming)**, gerçek iş yüklerini ve 25-düğümlü ölçek/churn testlerini ekler. **v0.6**, tanık (witness) çekirdeğiyle çift harcamayı **anlık olarak engeller** ve akışı relay üzerinden NAT'lı sağlayıcılara da taşır.
+**v0.2'den beri ağda hiçbir merkezi bileşen yoktur** — tracker yok, defter sunucusu yok, özel rol yok; her katılımcı aynı `kemi node`'u çalıştırır. **v0.3**, tüm iş trafiğini uçtan uca şifreler ve katman-parçalı modeller için pipeline paralelliğini ekler. **v0.4**, sürüyü tarayıcıdan izleyip yönetebileceğiniz gömülü canlı web panelini getirir. **v0.5**, Ollama ile **gerçek LLM çıkarımını**, sürü üzerinden **canlı token akışını (streaming)**, gerçek iş yüklerini ve 25-düğümlü ölçek/churn testlerini ekler. **v0.6**, tanık (witness) çekirdeğiyle çift harcamayı **anlık olarak engeller** ve akışı relay üzerinden NAT'lı sağlayıcılara da taşır. **v0.7 'Katılım Sürümü'**: 60 saniyelik `kemi katil` sihirbazı, davet kodları, LAN otomatik keşfi, gemi adları + rütbeler ve `kemi ogren` etkileşimli turu.
 
 ```
               ╭────────────────  KEŞİF: Kademlia DHT (UDP)  ────────────────╮
@@ -42,17 +42,47 @@ Kemi, **BitTorrent'in dosya paylaşımına yaptığını işlem gücüne yapan**
 
 Ödeme parça istekleriyle birlikte gittiği için kötü niyetli bir sağlayıcının çalabileceği tutar **bir parçanın fiyatıyla sınırlıdır** — BitTorrent'in küçük parçalarla riski sınırlaması gibi. Defter anlık kesinlik (finality) yerine **nihai tutarlılık** sunar: hile dedikodu yayılınca kesin olarak yakalanır ve hesap yakılır. İtibar + PoW kimlik maliyeti, tekrarlanan saldırıyı ekonomik olarak anlamsızlaştırır. v0.6'dan itibaren tanık komitesi çift harcamayı çoğu durumda *baştan engeller*; kanıt-ve-işaretleme katmanı, komitenin erişilemediği uç durumlar için güvenlik ağı olarak kalır.
 
-## Hızlı başlangıç
+## 60 saniyede katıl
 
 Zorunlu bağımlılık yok (Python ≥ 3.10 standart kütüphanesi yeter; `pynacl` önerilir):
 
 ```bash
 pip install -e .            # hızlı imza için: pip install -e ".[crypto]"
 
-kemi demo                   # tek komutla yerel merkeziyetsiz sürü gösterimi
-kemi demo --ui 8080         # demo sonrası sürü ayakta kalır; canlı panel:
-                            #   http://127.0.0.1:8080/
+kemi katil                  # hepsi bu.
 ```
+
+Sihirbaz gerisini halleder: gemine bir ad verir (kimliğinden türeyen
+"çevik-martı-42" gibi), **aynı Wi-Fi'daki filoyu otomatik bulur** (LAN keşfi),
+bulamazsa ilk gemi sen olursun; işlem gücünü paylaşmak isteyip istemediğini
+sorar, canlı paneli açar ve arkadaşlarına vereceğin **davet kodunu** basar.
+
+```bash
+kemi katil --davet kemi1-mfzgc…   # arkadaşının davet koduyla katıl
+kemi davet --peer IP:7700         # kendi filona davet kodu üret
+kemi ogren                        # 3 dakikalık etkileşimli tur (canlı filoyla)
+kemi demo --ui 8080               # gösterim sürüsü + canlı panel
+```
+
+CLI iki dilli: `katil/join`, `filo/providers`, `bakiye/balance`,
+`calistir/run`, `durum/status`, `kimlik/id`, `ogren/learn`.
+
+### Gemiler ve rütbeler
+
+Kemi'de ("kemi", *gemi* sözcüğünün eski hâli) her düğüm bir **gemidir** ve
+insanlar onaltılık kimlik yerine gemi adı görür. İşlem gücü paylaşarak kredi
+kazandıkça gemin **rütbe atlar** — tamamen yerel ve defterden türetilir:
+
+| Kazanılan kredi | Rütbe |
+|---|---|
+| 0+ | · Miço |
+| 25+ | ⚓ Tayfa |
+| 100+ | ⚓⚓ Serdümen |
+| 300+ | ⚓⚓⚓ Reis |
+| 1000+ | ★ Kaptan |
+| 5000+ | ★★ Amiral |
+
+Gemi adın ve rütben panelde, `kemi kimlik` çıktısında ve filo listelerinde görünür.
 
 Demo tek süreçte şunları kurar ve kanıtlar: bootstrap eşi, farklı fiyatlı dürüst sağlayıcılar, **NAT arkasında relay'le çalışan** bir sağlayıcı, **hileli** bir sağlayıcı ve bir tüketici. Hileli çoğunluk oylamasıyla elenir + yasaklanır ve iş bitince **bütün replikaların aynı bakiyelere yakınsadığı** gösterilir.
 
@@ -62,8 +92,8 @@ Demo tek süreçte şunları kurar ve kanıtlar: bootstrap eşi, farklı fiyatl�
 # 1. İlk eşi başlat (hiçbir özel rolü yok; sadece ilk olan o)
 kemi node --port 7700
 
-# 2. İşlem gücü paylaşacak her makinede
-kemi node --provide --peer ILK_ESIN_IP:7700 --price 0.5
+# 2. İşlem gücü paylaşacak her makinede (--lan: aynı ağda otomatik keşif)
+kemi node --provide --peer ILK_ESIN_IP:7700 --price 0.5 --lan
 #    NAT arkasındaysanız: --force-relay  (otomatik tespit de denenir)
 
 # 3. Sürüyü görüntüle
@@ -163,6 +193,10 @@ Yeni yetenekler `kemi/tasks.py` içine görev kaydederek eklenir; güvenlik sın
 | `kemi/protocol.py` | TCP tel protokolü: uzunluk önekli JSON |
 | `kemi/tasks.py`, `kemi/ai_backends.py` | İzin listeli görevler, takılabilir AI backend'leri |
 | `kemi/webui.py` | Gömülü canlı web paneli (stdlib HTTP; sağlayıcılar, defter, itibar, iş gönderme) |
+| `kemi/names.py` | Karakter katmanı: gemi adları ve rütbeler |
+| `kemi/invite.py` | Davet kodları (`kemi1-…`, sır içermez) |
+| `kemi/lan.py` | Sıfır-ayar LAN keşfi (multicast fener) |
+| `kemi/tutorial.py` | `kemi ogren`: canlı filoyla etkileşimli tur |
 | `kemi/cli.py`, `kemi/demo.py` | Komut satırı ve uçtan uca gösterim |
 
 ## Testler
@@ -171,7 +205,7 @@ Yeni yetenekler `kemi/tasks.py` içine görev kaydederek eklenir; güvenlik sın
 python3 -m unittest discover -s tests -v
 ```
 
-91 test: tanık komitesiyle eşzamanlı çift-harcama yarışının engellenmesi, veto + kanıt akışı, relay üzerinden canlı token akışı, 25 düğümlü sürü ölçeği, iş ortasında sağlayıcıların yarısının ölmesi (churn), disk üzerinden yeniden başlatma/seq güvenliği, canlı token akışı (tel üzerinde düz metin sızmadığının kanıtıyla), sahte Ollama sunucusuna karşı backend doğrulaması, kripto çapraz-backend birlikte çalışabilirliği (saf-Python NaCl uygulaması libsodium'a karşı bayt-bayt doğrulanır; RFC 7748/8439 test vektörleri), PoW kimlik, DHT depolama/arama, defter yakınsaması ve çift harcama kanıtı, itibar/yasaklama, sandbox, relay üzerinden NAT'lı sağlayıcı, relay'in yalnızca şifreli metin gördüğünün kanıtı, pipeline kompozisyonu ve hileli sağlayıcının çoğunlukla alt edilmesi dahil uçtan uca sürü senaryoları.
+104 test: gemi adlarının deterministikliği, rütbe eşikleri, davet kodu gidiş-dönüşü/bozuk kod reddi, LAN fener keşfi, eğitim turunun uçtan uca koşumu, tanık komitesiyle eşzamanlı çift-harcama yarışının engellenmesi, veto + kanıt akışı, relay üzerinden canlı token akışı, 25 düğümlü sürü ölçeği, iş ortasında sağlayıcıların yarısının ölmesi (churn), disk üzerinden yeniden başlatma/seq güvenliği, canlı token akışı (tel üzerinde düz metin sızmadığının kanıtıyla), sahte Ollama sunucusuna karşı backend doğrulaması, kripto çapraz-backend birlikte çalışabilirliği (saf-Python NaCl uygulaması libsodium'a karşı bayt-bayt doğrulanır; RFC 7748/8439 test vektörleri), PoW kimlik, DHT depolama/arama, defter yakınsaması ve çift harcama kanıtı, itibar/yasaklama, sandbox, relay üzerinden NAT'lı sağlayıcı, relay'in yalnızca şifreli metin gördüğünün kanıtı, pipeline kompozisyonu ve hileli sağlayıcının çoğunlukla alt edilmesi dahil uçtan uca sürü senaryoları.
 
 ## Yol haritası
 
