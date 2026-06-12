@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0 — Usability
+- High-level Python API: `kemi.connect()` / `Fleet` — run jobs, generate,
+  stream tokens, pipelines, balance/rank from three lines of code.
+- `kemi chat`: streaming AI REPL with per-reply cost and local transcript.
+- `kemi doctor`: ✓/✗ machine readiness diagnostics with actionable hints.
+- `kemi run --lines`: plain-text input, one item per non-empty line.
+
 ## 0.8.0 — Going Global
 - English-first across the CLI, wizard, tutorial, demo, dashboard and README;
   Turkish command/flag aliases preserved (`katil`, `filo`, `bakiye`, …).

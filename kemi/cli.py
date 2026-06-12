@@ -178,13 +178,18 @@ async def _cmd_balance(args: argparse.Namespace) -> int:
 
 
 async def _cmd_run(args: argparse.Namespace) -> int:
-    if args.input == "-":
-        items = json.load(sys.stdin)
+    text = sys.stdin.read() if args.input == "-" else Path(args.input).read_text()
+    if args.lines:
+        items: Any = [line for line in text.splitlines() if line.strip()]
+        if not items:
+            print("error: input has no non-empty lines", file=sys.stderr)
+            return 2
     else:
-        items = json.loads(Path(args.input).read_text())
-    if not isinstance(items, list):
-        print("error: input must be a JSON array of items", file=sys.stderr)
-        return 2
+        items = json.loads(text)
+        if not isinstance(items, list):
+            print("error: input must be a JSON array of items (or use --lines)",
+                  file=sys.stderr)
+            return 2
     node = await _with_ephemeral_node(args)
     try:
         consumer = Consumer(node)
@@ -385,6 +390,25 @@ async def _cmd_learn(args: argparse.Namespace) -> int:
     return await run_tutorial(fast=args.fast)
 
 
+async def _cmd_chat(args: argparse.Namespace) -> int:
+    from .chat import run_chat
+
+    node = await _with_ephemeral_node(args)
+    try:
+        return await run_chat(Consumer(node), max_tokens=args.max_tokens)
+    finally:
+        await node.stop()
+
+
+async def _cmd_doctor(args: argparse.Namespace) -> int:
+    from .doctor import render, run_checks
+
+    print("kemi doctor - checking this machine...\n")
+    peer = args.peer[0] if args.peer else None
+    checks = await run_checks(peer=peer, identity_path=args.identity)
+    return render(checks)
+
+
 async def _cmd_demo(args: argparse.Namespace) -> int:
     from .demo import run_demo
 
@@ -425,6 +449,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fast", "--hizli", dest="fast", action="store_true",
                    help="run start to finish without pausing")
     p.set_defaults(func=_cmd_learn)
+
+    p = sub.add_parser("chat", aliases=["sohbet"],
+                       help="talk to the fleet's AI (live streaming REPL)")
+    _add_common(p)
+    p.add_argument("--max-tokens", type=int, default=128,
+                   help="token budget per reply")
+    p.set_defaults(func=_cmd_chat)
+
+    p = sub.add_parser("doctor", aliases=["tani"],
+                       help="diagnose this machine's fleet readiness")
+    p.add_argument("--peer", type=_parse_endpoint, action="append", default=[],
+                   metavar="HOST:PORT", help="also test reachability of this peer")
+    p.add_argument("--identity", default=DEFAULT_IDENTITY_PATH)
+    p.set_defaults(func=_cmd_doctor)
 
     p = sub.add_parser("invite", aliases=["davet"],
                        help="mint an invite code for your fleet")
@@ -479,6 +517,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output", default=None, help="write results to this file")
     p.add_argument("--stream", action="store_true",
                    help="ai.generate: print tokens live as the model produces them")
+    p.add_argument("--lines", action="store_true",
+                   help="treat input as plain text: one item per non-empty line")
     p.set_defaults(func=_cmd_run)
 
     p = sub.add_parser("pipeline", help="run a multi-stage pipeline job over the swarm")

@@ -13,7 +13,9 @@ streaming, real workloads and 25-node scale tests. **v0.6** instant
 double-spend *prevention* via witness committees and streaming through
 relays. **v0.7** one-command onboarding, invite codes, LAN auto-discovery,
 ship names and ranks. **v0.8 goes global**: English-first everywhere, with
-Turkish command aliases kept on board.
+Turkish command aliases kept on board. **v0.9 is the usability release**: a
+three-line Python library API, `kemi chat` (a streaming AI REPL), `kemi
+doctor` diagnostics and plain-text job input.
 
 ```
             ╭───────────────  DISCOVERY: Kademlia DHT (UDP)  ───────────────╮
@@ -58,6 +60,8 @@ friends.
 kemi join --invite kemi1-mfzgc…   # join with a friend's invite code
 kemi invite --peer IP:7700        # mint an invite code for your fleet
 kemi learn                        # 3-minute interactive tour on a live fleet
+kemi chat --peer IP:7700          # talk to the fleet's AI, replies stream live
+kemi doctor                       # ✓/✗ readiness report for this machine
 kemi demo --ui 8080               # demo fleet + live dashboard
 ```
 
@@ -142,6 +146,60 @@ kemi node --peer FIRST_PEER_IP:7700 --ui 8080   # http://127.0.0.1:8080/
 
 All job traffic is **end-to-end encrypted by default** (provider records
 advertise the `e2e` capability; opt out with `Job(encrypt=False)`).
+
+### Use it as a Python library
+
+Kemi is a library, not just a CLI - embedding the fleet in your own
+application takes three lines:
+
+```python
+import asyncio, kemi
+
+async def main():
+    async with kemi.connect(peer="FIRST_PEER_IP:7700") as fleet:
+        hashes = await fleet.run("hash.sha256", ["a", "b", "c"])
+        answer = await fleet.generate("Why do P2P networks matter?")
+        async for token in fleet.stream("Tell me a story"):   # live tokens
+            print(token, end="", flush=True)
+        report = await fleet.run("data.aggregate", [records],
+                                 params={"group_by": "city", "op": "sum"},
+                                 redundancy=2, full_report=True)
+        print(fleet.ship, fleet.rank(), await fleet.balance())
+
+asyncio.run(main())
+```
+
+`connect()` also accepts `invite="kemi1-…"`, `lan=True` (auto-discover on
+the local network), `share=True` (offer this machine's compute while
+connected) and `identity_path=`/`ledger_path=` for a persistent wallet.
+`fleet.pipeline([...], items)` runs multi-stage pipeline jobs.
+
+### Chat with the fleet
+
+```bash
+kemi chat --peer FIRST_PEER_IP:7700
+```
+
+A conversational REPL: replies stream in token by token from the cheapest
+reputable provider, every reply shows its cost, and the transcript is kept
+locally so context-capable models (Ollama) hold a real conversation - the
+fleet itself stays stateless. Commands: `/balance`, `/clear`, `/quit`.
+
+### Plain-text jobs
+
+`kemi run --lines` treats input as plain text, one item per non-empty
+line - process a whole file across the fleet without writing JSON:
+
+```bash
+kemi run --peer ... --task text.wordcount --input corpus.txt --lines
+```
+
+### When something feels off: `kemi doctor`
+
+A ✓/✗ readiness report with actionable hints: Python version, crypto
+backend, identity file, task execution, sandbox isolation, LAN multicast,
+GPU presence, Ollama availability and (with `--peer`) reachability and
+latency of a fleet peer.
 
 ### AI inference (with real models)
 
@@ -235,6 +293,9 @@ the same way. New capabilities are added by registering tasks in
 | `kemi/invite.py` | Invite codes (`kemi1-…`, no secrets) |
 | `kemi/lan.py` | Zero-config LAN discovery (multicast beacon) |
 | `kemi/tutorial.py` | `kemi learn`: interactive tour on a live fleet |
+| `kemi/api.py` | High-level library API (`kemi.connect()` / `Fleet`) |
+| `kemi/chat.py` | `kemi chat`: streaming conversational REPL |
+| `kemi/doctor.py` | `kemi doctor`: machine readiness diagnostics |
 | `kemi/cli.py`, `kemi/demo.py` | Bilingual CLI and the end-to-end demo |
 
 ## Tests
@@ -243,7 +304,7 @@ the same way. New capabilities are added by registering tasks in
 python3 -m unittest discover -s tests -v
 ```
 
-104 tests, including: cross-backend crypto interoperability (the pure-Python
+115 tests, including: the three-line library API, chat turns with cost and history, doctor diagnostics, cross-backend crypto interoperability (the pure-Python
 NaCl implementation is verified byte-for-byte against libsodium, plus RFC
 7748/8439 vectors), PoW identities, DHT storage/lookup, ledger convergence
 and double-spend proofs, the witness committee blocking a concurrent
