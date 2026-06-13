@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.11.0 — AI marketplace & fuzz-hardened
+- Multi-model marketplace (T6): providers advertise their AI model name in
+  signed records; consumers pin a model with `--model` / `model=`, list
+  what's on offer with `kemi models` and `fleet.models()`. Dashboard and
+  `kemi providers` show the model column.
+- `ai.embed` task (T7): batch embeddings over the fleet (Ollama `/api/embed`
+  + deterministic unit-norm mock); `fleet.embed()` and the RAG building
+  block it unlocks.
+- Protocol fuzzing pass (T18): a malformed/hostile-input matrix against
+  every TCP handler and the DHT datagram path proves the node never
+  crashes (garbage in → error or closed connection, never a dead peer);
+  hardened `ledger.pull` cursor parsing found by the fuzzer.
+
 ## 0.10.0 — Seaworthy
 - DoS protection: per-IP token-bucket rate limits and connection caps on
   TCP and the DHT (UDP), global connection ceiling, relay-session caps,

@@ -115,6 +115,11 @@ async def _cmd_node(args: argparse.Namespace) -> int:
     if args.provide:
         print(f"  price: {node.price} credits/item, sandbox: {node.sandbox}, "
               f"tasks: {', '.join(node.supported_tasks)}")
+        from .ai_backends import backend_model
+
+        model = backend_model(node._task_context.get("ai_backend"))
+        if model:
+            print(f"  model: {model}")
         if node.resources.get("gpus"):
             print(f"  gpus: {node.resources['gpus']}")
     ui = None
@@ -158,10 +163,24 @@ async def _cmd_providers(args: argparse.Namespace) -> int:
             gpus = res.get("gpus") or []
             via = f"relay {record['relay']['host']}:{record['relay']['port']}" \
                 if record.get("relay") else f"{record['host']}:{record['port']}"
-            print(f"{record['node_id'][:12]}  {via}  {record['price']:.2f} cr/item  "
+            model = f" model={record['model']}" if record.get("model") else ""
+            print(f"{ship_name(record['node_id'])}  {via}  {record['price']:.2f} cr/item  "
                   f"rep={node.reputation.score(record['node_id']):.2f}  "
-                  f"cpu={res.get('cpu_count', '?')} gpu={len(gpus)}  "
+                  f"cpu={res.get('cpu_count', '?')} gpu={len(gpus)}{model}  "
                   f"tasks={','.join(record['tasks'])}")
+        return 0
+    finally:
+        await node.stop()
+
+
+async def _cmd_models(args: argparse.Namespace) -> int:
+    node = await _with_ephemeral_node(args)
+    try:
+        models = await Consumer(node).models(args.task)
+        if not models:
+            print(f"no AI models advertised for {args.task}")
+        for model in models:
+            print(model)
         return 0
     finally:
         await node.stop()
@@ -199,7 +218,8 @@ async def _cmd_run(args: argparse.Namespace) -> int:
                       file=sys.stderr)
                 return 2
             current = -1
-            async for event in consumer.stream_generate(items, json.loads(args.params)):
+            async for event in consumer.stream_generate(
+                    items, json.loads(args.params), model=args.model):
                 if event.get("done"):
                     print()
                     print(f"\n{len(items)} prompt(s) streamed; {event['spent']:.2f} "
@@ -219,6 +239,7 @@ async def _cmd_run(args: argparse.Namespace) -> int:
             params=json.loads(args.params),
             chunk_size=args.chunk_size,
             redundancy=args.redundancy,
+            model=args.model,
         ))
         output = json.dumps(report.results, ensure_ascii=False, indent=2)
         if args.output:
@@ -395,7 +416,8 @@ async def _cmd_chat(args: argparse.Namespace) -> int:
 
     node = await _with_ephemeral_node(args)
     try:
-        return await run_chat(Consumer(node), max_tokens=args.max_tokens)
+        return await run_chat(Consumer(node), max_tokens=args.max_tokens,
+                              model=args.model)
     finally:
         await node.stop()
 
@@ -455,7 +477,15 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p)
     p.add_argument("--max-tokens", type=int, default=128,
                    help="token budget per reply")
+    p.add_argument("--model", default=None, help="pin a specific AI model")
     p.set_defaults(func=_cmd_chat)
+
+    p = sub.add_parser("models", aliases=["modeller"],
+                       help="list AI models advertised by the fleet")
+    _add_common(p)
+    p.add_argument("--task", default="ai.generate",
+                   help="task to list models for (ai.generate or ai.embed)")
+    p.set_defaults(func=_cmd_models)
 
     p = sub.add_parser("doctor", aliases=["tani"],
                        help="diagnose this machine's fleet readiness")
@@ -519,6 +549,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="ai.generate: print tokens live as the model produces them")
     p.add_argument("--lines", action="store_true",
                    help="treat input as plain text: one item per non-empty line")
+    p.add_argument("--model", default=None,
+                   help="require providers advertising this AI model")
     p.set_defaults(func=_cmd_run)
 
     p = sub.add_parser("pipeline", help="run a multi-stage pipeline job over the swarm")

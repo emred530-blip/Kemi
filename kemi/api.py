@@ -76,34 +76,45 @@ class Fleet:
 
     # -- work --------------------------------------------------------------------
 
+    async def models(self, task: str = "ai.generate") -> list[str]:
+        """AI model names currently on offer in the fleet."""
+        return await self._consumer.models(task)
+
     async def run(self, task: str, items: list[Any], *,
                   params: dict[str, Any] | None = None, chunk_size: int = 8,
                   redundancy: int = 1, encrypt: bool = True,
-                  chunk_timeout: float = 120.0,
+                  chunk_timeout: float = 120.0, model: str | None = None,
                   full_report: bool = False) -> list[Any] | JobReport:
         """Run a job across the fleet; returns the results (or the full
         :class:`JobReport` with ``full_report=True``)."""
         report = await self._consumer.run_job(Job(
             task=task, items=items, params=dict(params or {}),
             chunk_size=chunk_size, redundancy=redundancy,
-            encrypt=encrypt, chunk_timeout=chunk_timeout,
+            encrypt=encrypt, chunk_timeout=chunk_timeout, model=model,
         ))
         return report if full_report else report.results
 
     async def generate(self, prompt: str, *, max_tokens: int = 128,
-                       redundancy: int = 1) -> str:
+                       redundancy: int = 1, model: str | None = None) -> str:
         """One prompt in, one completion out."""
         results = await self.run("ai.generate", [prompt],
                                  params={"max_tokens": max_tokens},
-                                 chunk_size=1, redundancy=redundancy)
+                                 chunk_size=1, redundancy=redundancy, model=model)
         return str(results[0])
 
+    async def embed(self, texts: list[str], *, redundancy: int = 1,
+                    model: str | None = None) -> list[list[float]]:
+        """Embed a batch of texts across the fleet (RAG building block)."""
+        return await self.run("ai.embed", texts, chunk_size=8,
+                              redundancy=redundancy, model=model)
+
     async def stream(self, prompt: str, *, max_tokens: int = 128,
-                     chunk_timeout: float = 300.0) -> AsyncIterator[str]:
+                     chunk_timeout: float = 300.0,
+                     model: str | None = None) -> AsyncIterator[str]:
         """Yield completion tokens live as a provider generates them."""
         async for event in self._consumer.stream_generate(
                 [prompt], {"max_tokens": max_tokens},
-                chunk_timeout=chunk_timeout):
+                chunk_timeout=chunk_timeout, model=model):
             if event.get("done"):
                 return
             yield event["token"]

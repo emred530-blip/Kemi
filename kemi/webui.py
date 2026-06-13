@@ -120,6 +120,7 @@ class WebUI:
                 "cpu": (p.get("resources") or {}).get("cpu_count"),
                 "gpus": len((p.get("resources") or {}).get("gpus") or []),
                 "stream": bool(p.get("stream")),
+                "model": p.get("model"),
                 "tasks": sorted(p["tasks"]),
             }
             for p in merged.values()

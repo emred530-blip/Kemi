@@ -25,7 +25,7 @@ TaskFn = Callable[[list[Any], dict[str, Any], dict[str, Any]], list[Any]]
 TASKS: dict[str, TaskFn] = {}
 
 # Tasks that only work when the provider has an AI backend configured.
-BACKEND_REQUIRED = frozenset({"ai.generate"})
+BACKEND_REQUIRED = frozenset({"ai.generate", "ai.embed"})
 
 
 class TaskError(Exception):
@@ -235,3 +235,15 @@ def _ai_generate(items: list[Any], params: dict[str, Any], context: dict[str, An
         raise TaskError("this provider has no AI backend configured")
     max_tokens = int(params.get("max_tokens", 64))
     return [backend.generate(str(prompt), max_tokens=max_tokens) for prompt in items]
+
+
+@register_task("ai.embed")
+def _ai_embed(items: list[Any], params: dict[str, Any], context: dict[str, Any]) -> list[Any]:
+    """items: list of texts -> list of embedding vectors (unlocks RAG)."""
+    backend = context.get("ai_backend")
+    if backend is None:
+        raise TaskError("this provider has no AI backend configured")
+    embed = getattr(backend, "embed", None)
+    if not callable(embed):
+        raise TaskError("this provider's backend does not support embeddings")
+    return [embed(str(text)) for text in items]

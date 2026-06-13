@@ -30,7 +30,8 @@ import subprocess
 import time
 from typing import Any
 
-from .ai_backends import AIBackend, AIBackendError, load_backend, supports_streaming
+from .ai_backends import (AIBackend, AIBackendError, backend_model, load_backend,
+                          supports_embedding, supports_streaming)
 from .crypto import canonical, digest, open_envelope, sign_envelope
 from .dht import DHTNode
 from .e2e import E2EError, derive_box_key, open_sealed, seal
@@ -388,12 +389,16 @@ class PeerNode:
                 price=self.price,
                 tasks=self.supported_tasks if self.provide else [],
                 resources=self.resources,
+                model=backend_model(self._task_context.get("ai_backend")),
                 ledger_txs=self.ledger.tx_count(),
                 dht_contacts=len(self.dht.table),
                 relayed=self._relay_endpoint is not None,
             )
         if msg_type == "ledger.pull":
-            cursor = int(message.get("cursor", 0))
+            try:
+                cursor = max(0, int(message.get("cursor", 0)))
+            except (TypeError, ValueError):
+                return error("bad_request", "cursor must be an integer")
             txs, new_cursor = self.ledger.txs_after(cursor)
             return ok(txs=txs, cursor=new_cursor)
         if msg_type == "ledger.push":
@@ -648,6 +653,7 @@ class PeerNode:
         relay = None
         if self._relay_endpoint is not None:
             relay = {"host": self._relay_endpoint[0], "port": self._relay_endpoint[1]}
+        backend = self._task_context.get("ai_backend")
         return make_provider_record(
             self.identity,
             host=self._advertised_host(),
@@ -656,7 +662,9 @@ class PeerNode:
             tasks=self.supported_tasks,
             resources=self.resources,
             relay=relay,
-            stream=supports_streaming(self._task_context.get("ai_backend")),
+            stream=supports_streaming(backend),
+            model=backend_model(backend),
+            embed=supports_embedding(backend),
         )
 
     async def _announce_once(self) -> None:

@@ -262,7 +262,8 @@ behind a reverse proxy you trust if you must expose it). It refreshes every
 
 | Task | Description | Sandboxed |
 |---|---|---|
-| `ai.generate` | Text generation (mock/Ollama/transformers; live streaming) | in-process (model memory) |
+| `ai.generate` | Text generation (mock/Ollama/transformers; live streaming; per-model via `--model`) | in-process (model memory) |
+| `ai.embed` | Batch text embeddings — the RAG building block | in-process (model memory) |
 | `ai.layer` | Layer-sharded model strip (pipeline parallelism) | ✓ |
 | `data.aggregate` | Map-reduce: group JSON records + sum/avg/min/max/count | ✓ |
 | `crypto.pbkdf2` | PBKDF2-HMAC-SHA256 key hardening (real CPU work) | ✓ |

@@ -36,7 +36,7 @@ def build_prompt(history: list[tuple[str, str]], user_message: str) -> str:
 
 async def chat_once(consumer: Consumer, history: list[tuple[str, str]],
                     user_message: str, *, max_tokens: int = 128,
-                    on_token=None) -> tuple[str, float, str]:
+                    on_token=None, model: str | None = None) -> tuple[str, float, str]:
     """One conversational turn. Returns (reply, credits_spent, provider_id)
     and appends the exchange to ``history``."""
     prompt = build_prompt(history, user_message)
@@ -44,7 +44,8 @@ async def chat_once(consumer: Consumer, history: list[tuple[str, str]],
     spent = 0.0
     provider = ""
     async for event in consumer.stream_generate([prompt],
-                                                {"max_tokens": max_tokens}):
+                                                {"max_tokens": max_tokens},
+                                                model=model):
         if event.get("done"):
             spent = float(event.get("spent", 0.0))
             provider = str(event.get("provider", ""))
@@ -57,18 +58,21 @@ async def chat_once(consumer: Consumer, history: list[tuple[str, str]],
     return reply, spent, provider
 
 
-async def run_chat(consumer: Consumer, *, max_tokens: int = 128) -> int:
+async def run_chat(consumer: Consumer, *, max_tokens: int = 128,
+                   model: str | None = None) -> int:
     """The interactive loop behind ``kemi chat``."""
-    providers = [p for p in await consumer.list_providers("ai.generate")
+    providers = [p for p in await consumer.list_providers("ai.generate", model=model)
                  if p.get("stream")]
     if not providers:
-        print("no streaming AI providers in this fleet "
+        suffix = f" with model {model!r}" if model else ""
+        print(f"no streaming AI providers in this fleet{suffix} "
               "(start one with: kemi node --provide --ai-backend ollama ...)",
               file=sys.stderr)
         return 1
     best = providers[0]
+    model_note = f", model {best['model']}" if best.get("model") else ""
     print(f"⚓ chatting with the fleet - best ship: {ship_name(best['node_id'])} "
-          f"({best['price']:.2f} cr/item, e2e encrypted)")
+          f"({best['price']:.2f} cr/item, e2e encrypted{model_note})")
     print("  commands: /balance  /clear  /quit\n")
 
     history: list[tuple[str, str]] = []
@@ -93,7 +97,7 @@ async def run_chat(consumer: Consumer, *, max_tokens: int = 128) -> int:
         try:
             _, spent, provider = await chat_once(
                 consumer, history, user_message, max_tokens=max_tokens,
-                on_token=lambda tok: print(tok, end="", flush=True))
+                on_token=lambda tok: print(tok, end="", flush=True), model=model)
         except JobError as exc:
             print(f"\n  error: {exc}", file=sys.stderr)
             continue

@@ -16,8 +16,8 @@ Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 | ID | Status | Task | Impact | Effort |
 |----|--------|------|--------|--------|
 | T5 | ⬜ | **Real transformer layer sharding** — replace `ai.layer`'s reference math with actual model layer groups so models too big for one ship run across the fleet (pipeline infra is ready) | High | High |
-| T6 | ⬜ | **Multi-model marketplace** — providers advertise model names (llama3.2, mistral…) in their records; consumers pick with `--model`; dashboard shows the model column | High | Medium |
-| T7 | ⬜ | **`ai.embed` task** — batch embeddings over the fleet (Ollama embed API + deterministic mock); unlocks RAG-style workloads | Medium | Low |
+| T6 | ✅ | **Multi-model marketplace** — providers advertise model names (llama3.2, mistral…) in their records; consumers pick with `--model`; dashboard shows the model column *(v0.11)* | High | Medium |
+| T7 | ✅ | **`ai.embed` task** — batch embeddings over the fleet (Ollama embed API + deterministic mock); unlocks RAG-style workloads *(v0.11)* | Medium | Low |
 
 ## C — Workloads
 
@@ -48,7 +48,7 @@ Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 |----|--------|------|--------|--------|
 | T16 | ⬜ | **Dynamic pricing** — providers auto-adjust price from their load/queue depth; market finds equilibrium | Medium | Medium |
 | T17 | ⬜ | **Economy simulation report** — model the genesis faucet, credit sinks and long-run inflation; recommend parameters | Medium | Medium |
-| T18 | ⬜ | **Protocol fuzzing pass** — malformed-message matrix across every TCP/UDP handler; crash-free guarantee under garbage input | High | Medium |
+| T18 | ✅ | **Protocol fuzzing pass** — malformed-message matrix across every TCP/UDP handler; crash-free guarantee under garbage input *(v0.11)* | High | Medium |
 
 ## Blocked on the user (not code)
 

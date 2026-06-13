@@ -51,6 +51,7 @@ class Job:
     redundancy: int = 1
     chunk_timeout: float = 120.0
     encrypt: bool = True  # end-to-end encrypt payloads when the provider supports it
+    model: str | None = None  # require providers advertising this AI model
 
 
 @dataclass
@@ -190,7 +191,8 @@ class Consumer:
         await self.node.sync_ledger()
         return self.node.ledger.balance(self.node.identity.node_id)
 
-    async def list_providers(self, task: str) -> list[dict[str, Any]]:
+    async def list_providers(self, task: str,
+                             model: str | None = None) -> list[dict[str, Any]]:
         providers = await find_providers(self.node.dht, task)
         usable = []
         for p in providers:
@@ -200,10 +202,17 @@ class Consumer:
                 continue
             if self.node.ledger.is_flagged(p["node_id"]):
                 continue
+            if model is not None and p.get("model") != model:
+                continue  # multi-model marketplace: consumer pins a model
             usable.append(p)
         # Best reputation first, then cheapest.
         usable.sort(key=lambda p: (-self.node.reputation.score(p["node_id"]), p["price"]))
         return usable
+
+    async def models(self, task: str = "ai.generate") -> list[str]:
+        """Distinct AI model names currently advertised for a task."""
+        seen = {p.get("model") for p in await self.list_providers(task)}
+        return sorted(m for m in seen if m)
 
     async def run_job(self, job: Job) -> JobReport:
         if not job.items:
@@ -211,9 +220,10 @@ class Consumer:
         if job.redundancy < 1:
             raise JobError("redundancy must be >= 1")
 
-        providers = await self.list_providers(job.task)
+        providers = await self.list_providers(job.task, model=job.model)
         if not providers:
-            raise JobError(f"no usable providers offer task {job.task!r}")
+            suffix = f" with model {job.model!r}" if job.model else ""
+            raise JobError(f"no usable providers offer task {job.task!r}{suffix}")
         if job.redundancy > len(providers):
             raise JobError(
                 f"redundancy {job.redundancy} needs at least that many providers "
@@ -357,7 +367,7 @@ class Consumer:
     async def stream_generate(self, prompts: list[Any],
                               params: dict[str, Any] | None = None,
                               chunk_timeout: float = 300.0,
-                              encrypt: bool = True):
+                              encrypt: bool = True, model: str | None = None):
         """Live LLM output over the swarm: an async generator that yields
         ``{"item", "token"}`` events as the provider produces them, then one
         final ``{"done": True, "results", "spent", "provider"}`` summary.
@@ -372,7 +382,7 @@ class Consumer:
         if not prompts:
             raise JobError("no prompts to stream")
         params = dict(params or {})
-        providers = [p for p in await self.list_providers("ai.generate")
+        providers = [p for p in await self.list_providers("ai.generate", model=model)
                      if p.get("stream")]
         if not providers:
             raise JobError("no streaming-capable providers for ai.generate")

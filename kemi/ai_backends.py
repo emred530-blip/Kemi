@@ -31,10 +31,12 @@ class AIBackendError(Exception):
 
 class AIBackend(Protocol):
     name: str
+    model: str
 
     def generate(self, prompt: str, max_tokens: int = 64) -> str: ...
 
     # Optional: def stream(self, prompt, max_tokens) -> Iterator[str]
+    # Optional: def embed(self, text: str) -> list[float]
 
 
 _WORDS = (
@@ -43,10 +45,14 @@ _WORDS = (
 ).split()
 
 
+EMBED_DIM = 64  # mock embedding width
+
+
 class MockBackend:
     """Deterministic stand-in for a real model: same prompt, same output."""
 
     name = "mock"
+    model = "mock"
 
     def __init__(self, token_delay: float = 0.0):
         self.token_delay = token_delay
@@ -69,6 +75,18 @@ class MockBackend:
             if self.token_delay:
                 time.sleep(self.token_delay)
             yield word if i == 0 else " " + word
+
+    def embed(self, text: str) -> list[float]:
+        """Deterministic unit-norm pseudo-embedding (same text, same vector)."""
+        vector: list[float] = []
+        counter = 0
+        while len(vector) < EMBED_DIM:
+            block = hashlib.sha256(f"embed:{text}:{counter}".encode("utf-8")).digest()
+            vector.extend((b - 127.5) / 127.5 for b in block)
+            counter += 1
+        vector = vector[:EMBED_DIM]
+        norm = sum(v * v for v in vector) ** 0.5 or 1.0
+        return [round(v / norm, 9) for v in vector]
 
 
 class OllamaBackend:
@@ -120,6 +138,22 @@ class OllamaBackend:
     def generate(self, prompt: str, max_tokens: int = 64) -> str:
         return "".join(self.stream(prompt, max_tokens))
 
+    def embed(self, text: str) -> list[float]:
+        body = json.dumps({"model": self.model, "input": text}).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.url}/api/embed", data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                payload = json.loads(response.read())
+        except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+            raise AIBackendError(f"ollama embed failed: {exc}")
+        embeddings = payload.get("embeddings")
+        if not embeddings or not isinstance(embeddings, list):
+            raise AIBackendError(f"ollama returned no embedding for model {self.model!r}")
+        return [float(x) for x in embeddings[0]]
+
 
 class TransformersBackend:
     """Hugging Face pipeline in-process (optional ``kemi[ai]`` extra)."""
@@ -154,3 +188,11 @@ def load_backend(name: str, **kwargs: Any) -> AIBackend:
 
 def supports_streaming(backend: AIBackend | None) -> bool:
     return backend is not None and callable(getattr(backend, "stream", None))
+
+
+def supports_embedding(backend: AIBackend | None) -> bool:
+    return backend is not None and callable(getattr(backend, "embed", None))
+
+
+def backend_model(backend: AIBackend | None) -> str | None:
+    return getattr(backend, "model", None) if backend is not None else None
