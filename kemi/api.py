@@ -133,6 +133,18 @@ class Fleet:
                       else PipelineStage(**stage) for stage in stages]
         return await self._consumer.run_pipeline(normalised, items)
 
+    async def shard_generate(self, prompt: str, *, max_tokens: int = 16,
+                             redundancy: int = 1, temperature: float = 0.0,
+                             spec: "ModelSpec | None" = None):
+        """Run a transformer sharded across the fleet — its layers split over
+        many ships, none holding the whole model. Returns a ShardReport."""
+        from .model import ModelSpec
+        from .sharded import ShardedLLM
+
+        llm = ShardedLLM(self._consumer, spec or ModelSpec())
+        return await llm.generate(prompt, max_tokens=max_tokens,
+                                  redundancy=redundancy, temperature=temperature)
+
     # -- lifecycle --------------------------------------------------------------
 
     async def close(self) -> None:

@@ -5,6 +5,18 @@ rent out their spare CPU/GPU for **credits**; anyone can spend those credits
 to run AI inference or other heavy workloads on the **fleet** — the swarm of
 peers. The goal: make centralised data centres matter less.
 
+> **⚓ The headline: run a model no single machine can hold.** Kemi splits a
+> transformer's layers across many ships — each one holds only its slice, the
+> hidden states between them are end-to-end encrypted, and every shard can be
+> redundancy-verified. A model too big for your laptop runs on three of them.
+> No API key, no account, no token to buy — pay with the compute you share.
+>
+> ```bash
+> kemi shard --peer FRIEND_IP:7700 --prompt "the fleet says" --layers 12
+> # 12-layer model spread over 3 ships: ...:L0-3  ...:L4-7  ...:L8-11
+> # no ship ever held all 12 layers
+> ```
+
 **Since v0.2 there is no central component anywhere** — no tracker, no ledger
 server, no special roles; every participant runs the same `kemi` node.
 **v0.3** added end-to-end encryption and pipeline parallelism. **v0.4** the
@@ -17,7 +29,11 @@ Turkish command aliases kept on board. **v0.9 is the usability release**: a
 three-line Python library API, `kemi chat` (a streaming AI REPL), `kemi
 doctor` diagnostics and plain-text job input. **v0.10 is seaworthy**:
 per-IP rate limits and connection caps, ledger checkpointing with fast
-snapshot bootstrap, and chat built into the dashboard.
+snapshot bootstrap, and chat built into the dashboard. **v0.11** adds a
+multi-model marketplace (`--model`), `ai.embed` for RAG, and a protocol
+fuzzing pass. **v0.12 runs a model no single machine can hold**: a real
+transformer sharded layer-by-layer across the fleet (`kemi shard`),
+redundancy-verified and end-to-end encrypted.
 
 ```
             ╭───────────────  DISCOVERY: Kademlia DHT (UDP)  ───────────────╮
@@ -270,6 +286,7 @@ behind a reverse proxy you trust if you must expose it). It refreshes every
 
 | Task | Description | Sandboxed |
 |---|---|---|
+| `ai.shard` | One transformer layer-group — the engine of fleet-wide big-model inference | ✓ |
 | `ai.generate` | Text generation (mock/Ollama/transformers; live streaming; per-model via `--model`) | in-process (model memory) |
 | `ai.embed` | Batch text embeddings — the RAG building block | in-process (model memory) |
 | `ai.layer` | Layer-sharded model strip (pipeline parallelism) | ✓ |
@@ -303,6 +320,7 @@ the same way. New capabilities are added by registering tasks in
 | `kemi/consumer.py` | Chunking, scheduling, fault tolerance, majority verification, per-chunk signed payment, streaming |
 | `kemi/protocol.py` | Wire protocol: length-prefixed JSON over TCP |
 | `kemi/tasks.py`, `kemi/ai_backends.py` | Allowlisted tasks; pluggable AI backends (mock/Ollama/transformers) |
+| `kemi/model.py`, `kemi/sharded.py` | Real shardable transformer + the big-model inference driver |
 | `kemi/webui.py` | Embedded live dashboard (stdlib HTTP) |
 | `kemi/names.py` | Character layer: ship names and ranks |
 | `kemi/invite.py` | Invite codes (`kemi1-…`, no secrets) |
@@ -319,7 +337,7 @@ the same way. New capabilities are added by registering tasks in
 python3 -m unittest discover -s tests -v
 ```
 
-128 tests, including: rate-limit and connection-cap enforcement, checkpoint determinism/prune/stale-replay, fast bootstrap from a pruned quorum, dashboard chat, the three-line library API, chat turns with cost and history, doctor diagnostics, cross-backend crypto interoperability (the pure-Python
+149 tests, including: sharded inference matching a local model byte-for-byte and surviving a corrupt shard provider by majority vote, multi-model marketplace pinning, `ai.embed`, a protocol fuzzing pass over every handler, rate-limit and connection-cap enforcement, checkpoint determinism/prune/stale-replay, fast bootstrap from a pruned quorum, dashboard chat, the three-line library API, chat turns with cost and history, doctor diagnostics, cross-backend crypto interoperability (the pure-Python
 NaCl implementation is verified byte-for-byte against libsodium, plus RFC
 7748/8439 vectors), PoW identities, DHT storage/lookup, ledger convergence
 and double-spend proofs, the witness committee blocking a concurrent
@@ -337,6 +355,8 @@ beacon discovery, and the tutorial running end to end.
   hole-punching alongside the relay.
 - **Harder isolation:** container/WASM runner, filesystem and network
   namespaces, real GPU quotas.
-- **Real model strips:** a backend that replaces `ai.layer`'s reference
-  implementation with actual transformer layer groups (the pipeline
-  infrastructure is ready).
+- **Trained-weight shards:** load real GGUF/safetensors weights into the
+  `ai.shard` path so the fleet serves an actual trained model (the sharding,
+  verification and encryption machinery is already in place via `kemi shard`).
+- **KV-cache for sharded inference:** avoid recomputing past positions each
+  token, the key optimisation for long sharded generations.

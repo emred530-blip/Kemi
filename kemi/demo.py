@@ -19,7 +19,7 @@ import asyncio
 import time
 from typing import Any
 
-from .consumer import Consumer, Job, PipelineStage
+from .consumer import Consumer, Job
 from .gossip_ledger import GENESIS_CREDITS
 from .identity import Identity
 from .names import ship_name
@@ -106,15 +106,19 @@ async def run_demo(ui_port: int | None = None) -> int:
     for prompt, completion in zip(prompts, ai_report.results):
         print(f"      {prompt!r} -> {completion!r}")
 
-    print("\n[6/7] pipeline parallelism: a 3-layer model strip, each layer running")
-    print("      on different ships (the basis for splitting large models)...")
-    pipeline = await consumer.run_pipeline(
-        [PipelineStage(task="ai.layer", params={"layer": layer}, chunk_size=2)
-         for layer in range(3)],
-        items=[[0.1 * i, -0.2, 0.3] for i in range(4)],
-    )
-    print(f"      4 hidden-state vectors crossed 3 stages; "
-          f"total {pipeline.spent:.2f} credits, sample output: {pipeline.results[1]}")
+    print("\n[6/7] SHARDED big-model inference: one transformer's layers split")
+    print("      across distinct ships — no single machine holds the model...")
+    from .model import ModelSpec
+    from .sharded import ShardedLLM
+
+    spec = ModelSpec(n_layers=12)
+    llm = ShardedLLM(consumer, spec)
+    plan = await llm.make_plan()
+    print(f"      {spec.n_layers}-layer model spread over {plan.ships} ships:")
+    print(f"        {plan.describe()}")
+    report = await llm.generate("the fleet says", max_tokens=6)
+    print(f"      generated {len(report.tokens)} tokens for {report.spent:.2f} credits; "
+          f"no ship ever held all {spec.n_layers} layers")
 
     print("\n[7/7] waiting for gossip to spread; comparing replicas...")
     everyone = [bootstrap, *providers, consumer_node]

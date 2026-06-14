@@ -227,6 +227,34 @@ def _ai_layer(items: list[Any], params: dict[str, Any], context: dict[str, Any])
     return out
 
 
+@register_task("ai.shard")
+def _ai_shard(items: list[Any], params: dict[str, Any], context: dict[str, Any]) -> list[Any]:
+    """Run a contiguous transformer layer range over hidden states.
+
+    The heart of distributed big-model inference: a provider executes only
+    the layers it was assigned (and only loads those layers' weights), so a
+    model too large for any single machine runs across the fleet. Pure
+    compute — no AI backend needed, fully sandboxable, and deterministic so
+    redundancy can cross-check each shard.
+
+    params: {spec, start, end}; items: list of hidden-state matrices.
+    """
+    from .model import ModelSpec, forward_layers
+
+    spec = ModelSpec.from_dict(params["spec"])
+    start, end = int(params["start"]), int(params["end"])
+    out = []
+    for hidden in items:
+        if not isinstance(hidden, list) or not hidden:
+            raise TaskError("ai.shard items must be non-empty hidden-state matrices")
+        if len(hidden) > spec.max_seq:
+            raise TaskError("sequence longer than the model's max_seq")
+        if any(len(row) != spec.d_model for row in hidden):
+            raise TaskError("hidden-state width does not match d_model")
+        out.append(forward_layers(spec, start, end, hidden))
+    return out
+
+
 @register_task("ai.generate")
 def _ai_generate(items: list[Any], params: dict[str, Any], context: dict[str, Any]) -> list[Any]:
     """items: list of prompts -> list of completions via the provider's backend."""

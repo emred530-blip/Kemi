@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.12.0 — Run a model no single machine can hold (T5)
+- Sharded big-model inference: a real GPT-style transformer
+  (`kemi/model.py`) whose layers split into contiguous groups, each group
+  assigned to a *different* ship via the new `ai.shard` task. No participant
+  ever holds — or even loads — the whole model; give it enough layers and it
+  cannot fit on any one machine, yet the fleet runs it end to end.
+- Verifiable: `ai.shard` is deterministic, so `redundancy=2` cross-checks
+  every layer shard on distinct ships — a corrupt shard is outvoted (tested).
+- Private: hidden states travel end-to-end encrypted; a provider sees only
+  its slice's activations, never the prompt or output.
+- `ShardedLLM` driver, `Fleet.shard_generate()`, and `kemi shard` /
+  `kemi parcala`. Pure-Python reference weights keep it dependency-free and
+  testable; point a provider at real trained weights and the same machinery
+  serves an actual model.
+
 ## 0.11.0 — AI marketplace & fuzz-hardened
 - Multi-model marketplace (T6): providers advertise their AI model name in
   signed records; consumers pin a model with `--model` / `model=`, list

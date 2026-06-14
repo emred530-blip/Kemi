@@ -15,7 +15,7 @@ Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 
 | ID | Status | Task | Impact | Effort |
 |----|--------|------|--------|--------|
-| T5 | ⬜ | **Real transformer layer sharding** — replace `ai.layer`'s reference math with actual model layer groups so models too big for one ship run across the fleet (pipeline infra is ready) | High | High |
+| T5 | ✅ | **Real transformer layer sharding** — a real GPT forward pass split into per-ship layer groups via `ai.shard`; no machine holds the whole model, shards redundancy-verified and e2e-encrypted *(v0.12)* | High | High |
 | T6 | ✅ | **Multi-model marketplace** — providers advertise model names (llama3.2, mistral…) in their records; consumers pick with `--model`; dashboard shows the model column *(v0.11)* | High | Medium |
 | T7 | ✅ | **`ai.embed` task** — batch embeddings over the fleet (Ollama embed API + deterministic mock); unlocks RAG-style workloads *(v0.11)* | Medium | Low |
 

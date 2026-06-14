@@ -259,6 +259,36 @@ async def _cmd_run(args: argparse.Namespace) -> int:
         await node.stop()
 
 
+async def _cmd_shard(args: argparse.Namespace) -> int:
+    from .model import ModelSpec
+    from .sharded import ShardedLLM
+
+    spec = ModelSpec(n_layers=args.layers)
+    node = await _with_ephemeral_node(args)
+    try:
+        llm = ShardedLLM(Consumer(node), spec)
+        try:
+            plan = await llm.make_plan(redundancy=args.redundancy)
+        except Exception as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        print(f"sharding {spec.name} ({spec.n_layers} layers) across "
+              f"{plan.ships} ship(s):", file=sys.stderr)
+        print(f"  {plan.describe()}", file=sys.stderr)
+        report = await llm.generate(args.prompt, max_tokens=args.max_tokens,
+                                    redundancy=args.redundancy, plan=plan)
+        print(report.text)
+        verified = (f", {report.verified_stages} stages cross-checked"
+                    if args.redundancy > 1 else "")
+        print(f"\n{len(report.tokens)} tokens; {report.spent:.2f} credits; "
+              f"no single ship held all {spec.n_layers} layers{verified}",
+              file=sys.stderr)
+        await asyncio.sleep(0.5)
+        return 0
+    finally:
+        await node.stop()
+
+
 async def _cmd_pipeline(args: argparse.Namespace) -> int:
     if args.input == "-":
         items = json.load(sys.stdin)
@@ -560,6 +590,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--input", required=True, help="JSON array of items, or - for stdin")
     p.add_argument("--output", default=None, help="write results to this file")
     p.set_defaults(func=_cmd_pipeline)
+
+    p = sub.add_parser("shard", aliases=["parcala"],
+                       help="run a transformer sharded across the fleet (no ship holds it all)")
+    _add_common(p)
+    p.add_argument("--prompt", required=True, help="text prompt to continue")
+    p.add_argument("--layers", type=int, default=6, help="model depth to shard")
+    p.add_argument("--max-tokens", type=int, default=16)
+    p.add_argument("--redundancy", type=int, default=1,
+                   help=">1 cross-checks each layer shard on distinct ships")
+    p.set_defaults(func=_cmd_shard)
 
     p = sub.add_parser("status", aliases=["durum"], help="query the health of one or more peers")
     p.add_argument("--peer", type=_parse_endpoint, action="append", required=True,

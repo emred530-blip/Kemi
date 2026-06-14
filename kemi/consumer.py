@@ -214,6 +214,55 @@ class Consumer:
         seen = {p.get("model") for p in await self.list_providers(task)}
         return sorted(m for m in seen if m)
 
+    async def execute_on(self, record: dict[str, Any], task: str, items: list[Any],
+                         params: dict[str, Any] | None = None, *,
+                         encrypt: bool = True, timeout: float = 120.0) -> list[Any]:
+        """Run one chunk on one *specific* provider — payment, e2e encryption
+        and ledger settlement included. The building block for sharded
+        inference, where each stage must land on a chosen ship rather than
+        whoever the scheduler prefers. Returns the results or raises JobError.
+        """
+        ledger, my_id = self.node.ledger, self.node.identity.node_id
+        provider_id = record["node_id"]
+        box_key = None
+        if encrypt and record.get("e2e") and isinstance(record.get("pubkey"), str):
+            try:
+                box_key = derive_box_key(self.node.identity.key.seed,
+                                         bytes.fromhex(record["pubkey"]))
+            except (E2EError, ValueError):
+                box_key = None
+        amount = round(record["price"] * len(items), 6)
+        if ledger.balance(my_id) < amount:
+            raise JobError(f"insufficient credits: need {amount:.2f}")
+        tx = ledger.make_tx(self.node.identity, provider_id, amount)
+        message: dict[str, Any] = {"type": "task.execute", "task": task, "payment": tx}
+        if box_key is not None:
+            message["enc"] = seal(box_key, canonical({"items": items, "params": params or {}}))
+        else:
+            message["items"], message["params"] = items, params or {}
+        try:
+            response = await send_to_provider(record, message, timeout=timeout)
+        except NETWORK_ERRORS as exc:
+            self.node.reputation.record(provider_id, "chunk_fail")
+            raise JobError(f"provider unreachable: {exc}")
+        if not response.get("ok"):
+            self.node.reputation.record(provider_id, "chunk_fail")
+            raise JobError(f"{response.get('error')}: {response.get('detail', '')}")
+        if box_key is not None:
+            try:
+                results = json.loads(open_sealed(box_key, response.get("enc") or {})).get("results")
+            except (E2EError, ValueError, json.JSONDecodeError):
+                results = None
+        else:
+            results = response.get("results")
+        if not isinstance(results, list) or len(results) != len(items):
+            self.node.reputation.record(provider_id, "chunk_fail")
+            raise JobError("provider returned a malformed result")
+        ledger.add_tx(tx)
+        self.node.gossip_tx(tx)
+        self.node.reputation.record(provider_id, "chunk_ok")
+        return results
+
     async def run_job(self, job: Job) -> JobReport:
         if not job.items:
             return JobReport(results=[], chunks=0, spent=0.0, exposure=0.0, providers_used={})
