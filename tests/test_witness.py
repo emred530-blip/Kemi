@@ -86,13 +86,32 @@ class WitnessTests(unittest.IsolatedAsyncioTestCase):
             "items": ["a", "b"], "params": {}, "payment": tx1}, timeout=15.0)
         self.assertTrue(first.get("ok"))
 
+        # A *sequential* double-spend: the first payment settles across the
+        # swarm before the second is attempted. Wait for tx1 to reach every
+        # node so any witness committee p2 consults provably holds it.
+        for _ in range(60):
+            for node in self.nodes:
+                await node.sync_ledger()
+            if all(n.ledger.tx_count() >= 1 for n in self.nodes):
+                break
+            await asyncio.sleep(0.1)
+
         second = await request("127.0.0.1", p2.port, {
             "type": "task.execute", "task": "hash.sha256",
             "items": ["a", "b"], "params": {}, "payment": tx2}, timeout=15.0)
+        # The witness committee vetoes the payment and bans the account on the
+        # spot (synchronous): p2 refused to work and flagged the attacker.
         self.assertFalse(second.get("ok"))
-        # the second provider received objective evidence and flagged the account
-        self.assertTrue(p2.ledger.is_flagged(attacker.identity.node_id))
         self.assertTrue(p2.reputation.is_banned(attacker.identity.node_id))
+        # The objective ledger flag needs both conflicting transfers locally;
+        # the second arrives via the witnesses' gossip (eventual consistency).
+        for _ in range(60):
+            for node in self.nodes:
+                await node.sync_ledger()
+            if p2.ledger.is_flagged(attacker.identity.node_id):
+                break
+            await asyncio.sleep(0.1)
+        self.assertTrue(p2.ledger.is_flagged(attacker.identity.node_id))
 
     async def test_witness_receipt_roundtrip(self):
         witness = await self._spawn()

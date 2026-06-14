@@ -231,6 +231,14 @@ echo '["Why do P2P networks matter?"]' | \
 # (end-to-end encrypted):
 echo '["Why do P2P networks matter?"]' | \
     kemi run --peer ... --task ai.generate --input - --stream
+
+# Pick a specific model from the marketplace:
+kemi models --peer ...                       # what's on offer
+kemi run --peer ... --task ai.generate --input - --model llama3.2 --stream
+
+# Embeddings (the RAG building block):
+echo '["doc one", "doc two"]' | \
+    kemi run --peer ... --task ai.embed --input - --lines
 ```
 
 Streaming is the one path where payment is taken *first* (otherwise the
