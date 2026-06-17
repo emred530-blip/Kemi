@@ -83,6 +83,21 @@ kemi doctor                       # ✓/✗ readiness report for this machine
 kemi demo --ui 8080               # demo fleet + live dashboard
 ```
 
+### See a real multi-process fleet
+
+`kemi demo` runs in one process; to watch genuinely separate OS processes
+discover each other and trade work over live sockets, run:
+
+```bash
+PYTHONPATH=. python3 scripts/lan_demo.py
+```
+
+It launches a bootstrap peer and three provider processes (each its own
+`kemi node` on its own port), then connects as a consumer: DHT discovery,
+a redundancy-checked paid job, and a 9-layer model sharded across the three
+provider processes — none holding the whole model. Point the providers'
+`--peer` at a real IP and the same script spans two machines.
+
 The CLI is bilingual — Turkish aliases ship with it: `katil/join`,
 `filo/providers`, `bakiye/balance`, `calistir/run`, `durum/status`,
 `kimlik/id`, `ogren/learn`, `davet/invite`.
