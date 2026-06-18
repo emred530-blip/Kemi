@@ -81,6 +81,14 @@ class WebUI:
     def url(self) -> str:
         return f"http://{self.host}:{self.port}/"
 
+    def _invite_code(self) -> str:
+        from .cli import _guess_lan_ip
+        from .invite import make_invite
+        from .names import ship_name as _ship
+
+        return make_invite([(_guess_lan_ip(), self.node.port)],
+                           note=_ship(self.node.identity.node_id))
+
     # -- background state ------------------------------------------------------
 
     async def _providers_loop(self) -> None:
@@ -142,6 +150,7 @@ class WebUI:
                 "port": node.port,
                 "provide": node.provide,
                 "price": node.price,
+                "invite": self._invite_code(),
                 "relayed": node._relay_endpoint is not None,
                 "tasks": node.supported_tasks,
             },
@@ -409,8 +418,13 @@ _PAGE = """<!doctype html>
 <header>
   <h1>kemi <span class="dim">fleet panel</span></h1>
   <span id="nodeinfo" class="dim"></span>
+  <button id="invitebtn" type="button" title="Copy an invite code to share with a friend"
+          style="width:auto;padding:7px 14px;margin-left:8px">⚓ Invite a friend</button>
   <span class="balance"><span id="balance">…</span> <span class="dim">credits</span></span>
 </header>
+<p id="welcome" style="margin:0;padding:6px 22px;color:var(--dim);border-bottom:1px solid var(--line)">
+  Welcome aboard! Ask the AI below, or share an invite so friends pool their computers with yours.
+</p>
 <main>
   <section>
     <h2>Providers (live)</h2>
@@ -474,8 +488,10 @@ const ago = (ts, now) => { const d = Math.max(0, now - ts);
 
 let knownTasks = [];
 
+let _inviteCode = '';
 function render(s) {
   $('#balance').textContent = s.balance.toFixed(2);
+  _inviteCode = s.node.invite || '';
   $('#nodeinfo').textContent = `⚓ ${s.node.name} · ${s.node.rank} · port ${s.node.port}` +
     (s.node.provide ? ` · provider (${s.node.price} cr/item)` : ' · peer') +
     (s.node.relayed ? ' · via relay' : '');
@@ -592,6 +608,13 @@ $('#chatform').addEventListener('submit', async (ev) => {
   box.value = '';
   await fetch('/api/chat', { method: 'POST', body: JSON.stringify({ message }) });
   refresh();
+});
+
+$('#invitebtn').addEventListener('click', async () => {
+  if (!_inviteCode) return;
+  const cmd = 'kemi join --invite ' + _inviteCode;
+  try { await navigator.clipboard.writeText(cmd); } catch (e) {}
+  window.prompt('Send this to a friend — they paste it and run it to join your fleet:', cmd);
 });
 
 refresh();

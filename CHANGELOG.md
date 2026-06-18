@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.0 — No coding required
+- `kemi app` (alias `uygulama`): one command starts a sharing node and
+  opens the dashboard in the browser — the no-terminal-after-this mode.
+- `kemi node --open` auto-opens the dashboard too.
+- Friendlier dashboard: a welcome banner and a one-click "Invite a friend"
+  button that copies a ready-to-paste join command to the clipboard.
+- Double-click launchers: `launchers/Kemi-Start.command` (macOS/Linux) and
+  `Kemi-Start.bat` (Windows). README now opens with a "Not a coder?" path.
+
 ## 0.12.0 — Run a model no single machine can hold (T5)
 - Sharded big-model inference: a real GPT-style transformer
   (`kemi/model.py`) whose layers split into contiguous groups, each group

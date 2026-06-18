@@ -129,6 +129,12 @@ async def _cmd_node(args: argparse.Namespace) -> int:
         ui = WebUI(node, host=args.ui_host, port=args.ui)
         await ui.start()
         print(f"  dashboard: {ui.url}")
+        if args.open and args.ui_host in ("127.0.0.1", "localhost"):
+            import webbrowser
+            try:
+                webbrowser.open(ui.url)
+            except Exception:
+                pass
     try:
         await node.serve_forever()
     except asyncio.CancelledError:
@@ -136,6 +142,44 @@ async def _cmd_node(args: argparse.Namespace) -> int:
     finally:
         if ui is not None:
             await ui.stop()
+        await node.stop()
+    return 0
+
+
+async def _cmd_app(args: argparse.Namespace) -> int:
+    """The no-terminal-after-this experience: one command starts a sharing
+    node and opens the dashboard in the browser. Everything else is clicks."""
+    import webbrowser
+
+    from .webui import WebUI
+
+    print(BANNER)
+    print("  Starting Kemi… your computer is joining the fleet.")
+    node = _make_node(
+        args, host="0.0.0.0", port=args.port, provide=not args.watch,
+        price=args.price, lan=True,
+        ai_backend=None if args.ai_backend == "none" else args.ai_backend,
+    )
+    if args.peer:
+        node.bootstrap_peers.extend(p for p in args.peer if p not in node.bootstrap_peers)
+    await node.start()
+    name = ship_name(node.identity.node_id)
+    ui = WebUI(node, host="127.0.0.1", port=args.ui)
+    await ui.start()
+    print(f"\n  ⚓ Your ship '{name}' is sailing.")
+    print(f"  ✦ Open this in your browser:  {ui.url}")
+    print("  ✦ Everything happens there — chat with the AI, invite friends, watch the fleet.")
+    print("  ✦ Keep this window open. Press Ctrl+C to stop.\n")
+    try:
+        webbrowser.open(ui.url)
+    except Exception:
+        pass
+    try:
+        await node.serve_forever()
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await ui.stop()
         await node.stop()
     return 0
 
@@ -555,7 +599,24 @@ def build_parser() -> argparse.ArgumentParser:
                    help="dashboard bind address (default: localhost only)")
     p.add_argument("--lan", action="store_true",
                    help="auto-discover ships on the local network")
+    p.add_argument("--open", action="store_true",
+                   help="open the dashboard in your browser automatically")
     p.set_defaults(func=_cmd_node)
+
+    p = sub.add_parser("app", aliases=["uygulama"],
+                       help="the easy mode: start sharing and open the dashboard (no coding)")
+    p.add_argument("--peer", type=_parse_endpoint, action="append", default=[],
+                   metavar="HOST:PORT", help="a friend's peer to join (optional)")
+    p.add_argument("--watch", action="store_true",
+                   help="don't share compute; just use the fleet")
+    p.add_argument("--price", type=float, default=1.0)
+    p.add_argument("--port", type=int, default=7700)
+    p.add_argument("--ui", type=int, default=8080, metavar="PORT")
+    p.add_argument("--ai-backend", default="mock", choices=("mock", "ollama", "transformers", "none"))
+    p.add_argument("--identity", default=DEFAULT_IDENTITY_PATH)
+    p.add_argument("--ledger", default=DEFAULT_LEDGER_PATH)
+    p.add_argument("--reputation", default=DEFAULT_REPUTATION_PATH)
+    p.set_defaults(func=_cmd_app)
 
     p = sub.add_parser("providers", aliases=["fleet", "filo"], help="list discoverable providers")
     _add_common(p)

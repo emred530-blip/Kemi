@@ -53,6 +53,21 @@ redundancy-verified and end-to-end encrypted.
             ╰────────────────────────────────────────────────────────────────╯
 ```
 
+## Not a coder? Start here
+
+You don't write any code to use Kemi — you run one thing, then everything
+happens in your browser.
+
+1. **Install Python** (once) from [python.org/downloads](https://www.python.org/downloads/) — just click through the installer.
+2. **Install Kemi** (once): open Terminal and paste
+   `curl -fsSL https://raw.githubusercontent.com/emred530-blip/Kemi/main/scripts/install.sh | sh`
+3. **Start it:** type `kemi app` — a browser window opens with your control
+   panel. Chat with the AI, watch the fleet, and click **“Invite a friend”**
+   to copy a code your friends paste to join. That's it.
+
+Prefer double-clicking? The `launchers/` folder has **Kemi-Start.command**
+(macOS) and **Kemi-Start.bat** (Windows) — double-click to launch.
+
 ## Join in 60 seconds
 
 No required dependencies (Python ≥ 3.10 standard library is enough;
