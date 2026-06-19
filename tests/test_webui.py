@@ -51,6 +51,14 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         self.assertIn("text/html", ctype)
         self.assertIn(b"fleet panel", body)
+        self.assertIn(b"Invite a friend", body)   # easy-mode invite button
+        self.assertIn(b'data-tpl="ai"', body)      # job templates (T11)
+
+    async def test_prometheus_metrics_endpoint(self):
+        status, ctype, body = await asyncio.to_thread(_http, "GET", self.base + "/metrics")
+        self.assertEqual(status, 200)
+        self.assertIn("text/plain", ctype)
+        self.assertIn(b"kemi_balance", body)
 
     async def test_state_api(self):
         # wait for the provider cache to fill

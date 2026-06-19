@@ -497,6 +497,14 @@ async def _cmd_chat(args: argparse.Namespace) -> int:
         await node.stop()
 
 
+async def _cmd_economy(args: argparse.Namespace) -> int:
+    from .economy import render, simulate
+
+    print(render(simulate(identities=args.identities, providers=args.providers,
+                          rounds=args.rounds)))
+    return 0
+
+
 async def _cmd_service(args: argparse.Namespace) -> int:
     from .service import install
 
@@ -586,6 +594,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--task", default="ai.generate",
                    help="task to list models for (ai.generate or ai.embed)")
     p.set_defaults(func=_cmd_models)
+
+    p = sub.add_parser("economy", aliases=["ekonomi"],
+                       help="simulate and report on the credit economy")
+    p.add_argument("--identities", type=int, default=100)
+    p.add_argument("--providers", type=int, default=30)
+    p.add_argument("--rounds", type=int, default=2000)
+    p.set_defaults(func=_cmd_economy)
 
     p = sub.add_parser("service", aliases=["servis"],
                        help="install an auto-start service (systemd/launchd)")

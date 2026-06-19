@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.0 — Trust, economy, and dashboard polish
+- Stake-weighted witness committees (T1): among the candidates near a
+  sender's witness key, established (higher-earned) ships are preferred as
+  witnesses — an attacker must out-earn real ships, not just mint identities.
+- Economy model + `kemi economy` (T17): a deterministic credit-flow
+  simulation showing supply is conserved (no per-tx inflation), the faucet
+  is PoW-gated, and credits concentrate toward providers (tit-for-tat).
+- Dashboard job templates (T11): one-click presets (hash, word count, ask
+  AI, embed, aggregate) fill the job form.
+
 ## 0.14.0 — Operational maturity
 - Result cache (T4): providers serve identical deterministic work from a
   content-addressed LRU cache — the consumer still pays, the provider saves

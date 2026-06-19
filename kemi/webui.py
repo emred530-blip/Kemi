@@ -441,6 +441,8 @@ _PAGE = """<!doctype html>
   .row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
   button { background:#1f6feb; border:none; cursor:pointer; font-weight:bold; }
   button:hover { filter:brightness(1.15); }
+  button.tpl { background:var(--line); color:var(--fg); font-weight:normal;
+               width:auto; padding:3px 9px; margin:2px; font-size:12px; }
   #jobmsg { min-height:18px; font-size:12px; }
   footer { padding:8px 22px 20px; color:var(--dim); font-size:12px; }
 </style></head><body>
@@ -463,6 +465,14 @@ _PAGE = """<!doctype html>
   </section>
   <section>
     <h2>Submit a job</h2>
+    <div id="templates" style="margin-bottom:10px">
+      <span class="dim" style="font-size:12px">templates:</span>
+      <button type="button" class="tpl" data-tpl="hash">hash text</button>
+      <button type="button" class="tpl" data-tpl="wordcount">word count</button>
+      <button type="button" class="tpl" data-tpl="ai">ask AI</button>
+      <button type="button" class="tpl" data-tpl="embed">embed (RAG)</button>
+      <button type="button" class="tpl" data-tpl="aggregate">aggregate data</button>
+    </div>
     <form id="jobform">
       <div class="row">
         <div><label>task</label><select id="task"></select></div>
@@ -638,6 +648,27 @@ $('#chatform').addEventListener('submit', async (ev) => {
   await fetch('/api/chat', { method: 'POST', body: JSON.stringify({ message }) });
   refresh();
 });
+
+const TEMPLATES = {
+  hash: {task: 'hash.sha256', chunk: 4, redundancy: 1,
+         items: '["hello", "world"]', params: '{}'},
+  wordcount: {task: 'text.wordcount', chunk: 4, redundancy: 1,
+              items: '["the quick brown fox", "lazy dog"]', params: '{}'},
+  ai: {task: 'ai.generate', chunk: 1, redundancy: 1,
+       items: '["Why do P2P networks matter?"]', params: '{"max_tokens": 32}'},
+  embed: {task: 'ai.embed', chunk: 8, redundancy: 1,
+          items: '["first document", "second document"]', params: '{}'},
+  aggregate: {task: 'data.aggregate', chunk: 1, redundancy: 1,
+              items: '[[{"city":"a","n":3},{"city":"b","n":4},{"city":"a","n":1}]]',
+              params: '{"group_by": "city", "field": "n", "op": "sum"}'},
+};
+document.querySelectorAll('.tpl').forEach(btn => btn.addEventListener('click', () => {
+  const t = TEMPLATES[btn.dataset.tpl];
+  if (!t) return;
+  $('#task').value = t.task; $('#chunk').value = t.chunk;
+  $('#redundancy').value = t.redundancy; $('#items').value = t.items;
+  $('#params').value = t.params;
+}));
 
 $('#invitebtn').addEventListener('click', async () => {
   if (!_inviteCode) return;

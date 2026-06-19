@@ -502,6 +502,16 @@ class PeerNode:
         })
         return ok(receipt=receipt)
 
+    def _rank_witnesses(self, candidates: list) -> list:
+        """Stake-weighted committee membership (T1): among candidates near the
+        sender's witness key, prefer established (higher-earned) ships. An
+        attacker must not only mint identities near the victim's key (PoW) but
+        also out-earn real ships to capture the committee."""
+        ranked = sorted(candidates,
+                        key=lambda c: self.ledger.total_earned(c.node_id),
+                        reverse=True)
+        return ranked[:WITNESS_COUNT]
+
     async def _witness_check(self, payment: dict[str, Any],
                              sender: str) -> tuple[bool, str]:
         """Ask the sender's witness committee to lock this transfer.
@@ -518,9 +528,9 @@ class PeerNode:
             committee = cached[1]
         else:
             contacts = await self.dht.lookup(witness_key(sender))
-            committee = [c for c in contacts
-                         if c.node_id not in (sender, self.identity.node_id)]
-            committee = committee[:WITNESS_COUNT]
+            candidates = [c for c in contacts
+                          if c.node_id not in (sender, self.identity.node_id)]
+            committee = self._rank_witnesses(candidates)
             self._witness_cache[sender] = (time.monotonic() + WITNESS_CACHE_TTL,
                                            committee)
         if not committee:

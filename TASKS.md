@@ -6,7 +6,7 @@ Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 
 | ID | Status | Task | Impact | Effort |
 |----|--------|------|--------|--------|
-| T1 | ⬜ | **Stake-weighted witness committees** — weight committee membership by earned credits on top of PoW; raises the economic cost of Sybil attacks on payment finality | High | Medium |
+| T1 | ✅ | **Stake-weighted witness committees** — higher-earned ships preferred as witnesses near a sender's key; attacker must out-earn real ships *(v0.15)* | High | Medium |
 | T2 | ⬜ | **UDP hole-punching** — direct NAT-to-NAT task traffic coordinated via the DHT, relay stays as fallback; cuts relay load and latency | High | High |
 | T3 | ✅ | **Protocol specification (SPEC.md)** — wire formats, DHT keys, tx/envelope schemas, witness flow; enables clients in other languages *(v0.14)* | Medium | Medium |
 | T4 | ✅ | **Result cache** — content-addressed LRU of (task, items, params) results on providers; identical work served instantly *(v0.14)* | Medium | Medium |
@@ -31,7 +31,7 @@ Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 | ID | Status | Task | Impact | Effort |
 |----|--------|------|--------|--------|
 | T10 | ⬜ | **Fleet map** — live network topology visualisation in the dashboard (ships, relay links, traffic) | Medium | Medium |
-| T11 | ⬜ | **Job templates & result views** — one-click presets for common jobs, table/chart rendering for aggregate results | Medium | Low |
+| T11 | ✅ | **Job templates** — one-click presets (hash/wordcount/AI/embed/aggregate) in the dashboard *(v0.15)* | Medium | Low |
 | T12 | ⬜ | **Bilingual dashboard** — TR/EN language toggle in the panel | Low | Low |
 
 ## E — Operations
@@ -47,7 +47,7 @@ Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 | ID | Status | Task | Impact | Effort |
 |----|--------|------|--------|--------|
 | T16 | ✅ | **Dynamic pricing** — `--dynamic-price` surges price with load; base stays the floor *(v0.14)* | Medium | Medium |
-| T17 | ⬜ | **Economy simulation report** — model the genesis faucet, credit sinks and long-run inflation; recommend parameters | Medium | Medium |
+| T17 | ✅ | **Economy simulation** — `kemi economy`: conserved supply, PoW-gated faucet, credits flow to providers *(v0.15)* | Medium | Medium |
 | T18 | ✅ | **Protocol fuzzing pass** — malformed-message matrix across every TCP/UDP handler; crash-free guarantee under garbage input *(v0.11)* | High | Medium |
 
 ## Blocked on the user (not code)
