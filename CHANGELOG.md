@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0 — Release
+First stable release. A fully decentralised peer-to-peer compute-sharing
+network: Kademlia DHT discovery, Ed25519 proof-of-work identities, a
+gossip-replicated CRDT credit ledger with witness-committee double-spend
+prevention and checkpointing, redundancy-verified + end-to-end-encrypted
+execution, NAT relay, sandboxing, DoS resistance, and sharded big-model
+inference (run a model no single machine can hold). Batteries included:
+`kemi app` one-command launch with an auto-opening dashboard, `kemi join`
+onboarding, `kemi chat`/`shard`/`economy`/`service`, a three-line Python
+API, Ollama/transformers backends, a multi-model marketplace, Prometheus
+metrics, Docker, a one-line installer, and a full protocol spec (SPEC.md).
+169 tests, green across repeated full runs. See RELEASE.md to publish.
+
+
 ## 0.15.0 — Trust, economy, and dashboard polish
 - Stake-weighted witness committees (T1): among the candidates near a
   sender's witness key, established (higher-earned) ships are preferred as
