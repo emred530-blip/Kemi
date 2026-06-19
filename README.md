@@ -33,7 +33,12 @@ snapshot bootstrap, and chat built into the dashboard. **v0.11** adds a
 multi-model marketplace (`--model`), `ai.embed` for RAG, and a protocol
 fuzzing pass. **v0.12 runs a model no single machine can hold**: a real
 transformer sharded layer-by-layer across the fleet (`kemi shard`),
-redundancy-verified and end-to-end encrypted.
+redundancy-verified and end-to-end encrypted. **v0.13** adds a no-coding
+`kemi app` mode (auto-opens the dashboard). **v0.14** brings operational
+maturity — result caching, Prometheus metrics, dynamic pricing, a
+`kemi service` installer, Docker, and a full protocol spec ([SPEC.md](SPEC.md)).
+**v0.15** adds stake-weighted witnesses, a credit-economy simulation
+(`kemi economy`) and one-click dashboard job templates.
 
 ```
             ╭───────────────  DISCOVERY: Kademlia DHT (UDP)  ───────────────╮
@@ -74,7 +79,10 @@ No required dependencies (Python ≥ 3.10 standard library is enough;
 `pynacl` recommended):
 
 ```bash
-# one-line install (isolated venv + `kemi` on your PATH):
+# from PyPI (once published — see RELEASE.md):
+pip install kemi
+
+# or the one-line installer (isolated venv + `kemi` on your PATH):
 curl -fsSL https://raw.githubusercontent.com/emred530-blip/Kemi/main/scripts/install.sh | sh
 
 # or from a clone:
@@ -82,6 +90,10 @@ pip install -e .            # for fast signatures: pip install -e ".[crypto]"
 
 kemi join                   # that's it.
 ```
+
+Running a server? `docker compose up` brings up a containerised fleet, and
+`kemi service` installs a systemd/launchd unit so a provider auto-rejoins
+after reboot.
 
 The wizard does the rest: names your ship (derived from your identity, like
 "swift-gull-42"), **auto-discovers a fleet on your Wi-Fi** (LAN discovery),
@@ -94,7 +106,10 @@ kemi join --invite kemi1-mfzgc…   # join with a friend's invite code
 kemi invite --peer IP:7700        # mint an invite code for your fleet
 kemi learn                        # 3-minute interactive tour on a live fleet
 kemi chat --peer IP:7700          # talk to the fleet's AI, replies stream live
+kemi shard --peer IP:7700 --prompt "..."   # run a sharded model on the fleet
 kemi doctor                       # ✓/✗ readiness report for this machine
+kemi economy                      # simulate the credit economy
+kemi service                      # install an auto-start provider service
 kemi demo --ui 8080               # demo fleet + live dashboard
 ```
 
@@ -351,7 +366,10 @@ the same way. New capabilities are added by registering tasks in
 | `kemi/protocol.py` | Wire protocol: length-prefixed JSON over TCP |
 | `kemi/tasks.py`, `kemi/ai_backends.py` | Allowlisted tasks; pluggable AI backends (mock/Ollama/transformers) |
 | `kemi/model.py`, `kemi/sharded.py` | Real shardable transformer + the big-model inference driver |
-| `kemi/webui.py` | Embedded live dashboard (stdlib HTTP) |
+| `kemi/webui.py` | Embedded live dashboard (stdlib HTTP) + Prometheus `/metrics` |
+| `kemi/ratelimit.py` | Per-IP token buckets and connection caps (DoS resistance) |
+| `kemi/economy.py` | Credit-economy model and `kemi economy` simulation |
+| `kemi/service.py` | systemd/launchd unit generation (`kemi service`) |
 | `kemi/names.py` | Character layer: ship names and ranks |
 | `kemi/invite.py` | Invite codes (`kemi1-…`, no secrets) |
 | `kemi/lan.py` | Zero-config LAN discovery (multicast beacon) |
@@ -367,7 +385,7 @@ the same way. New capabilities are added by registering tasks in
 python3 -m unittest discover -s tests -v
 ```
 
-149 tests, including: sharded inference matching a local model byte-for-byte and surviving a corrupt shard provider by majority vote, multi-model marketplace pinning, `ai.embed`, a protocol fuzzing pass over every handler, rate-limit and connection-cap enforcement, checkpoint determinism/prune/stale-replay, fast bootstrap from a pruned quorum, dashboard chat, the three-line library API, chat turns with cost and history, doctor diagnostics, cross-backend crypto interoperability (the pure-Python
+169 tests, including: sharded inference matching a local model byte-for-byte and surviving a corrupt shard provider by majority vote, multi-model marketplace pinning, `ai.embed`, a protocol fuzzing pass over every handler, rate-limit and connection-cap enforcement, checkpoint determinism/prune/stale-replay, fast bootstrap from a pruned quorum, dashboard chat, the three-line library API, chat turns with cost and history, doctor diagnostics, cross-backend crypto interoperability (the pure-Python
 NaCl implementation is verified byte-for-byte against libsodium, plus RFC
 7748/8439 vectors), PoW identities, DHT storage/lookup, ledger convergence
 and double-spend proofs, the witness committee blocking a concurrent
@@ -379,12 +397,12 @@ beacon discovery, and the tutorial running end to end.
 
 ## Roadmap
 
-- **Stake-weighted witnesses:** weighting committee membership by earned
-  credits on top of PoW (stronger Sybil resistance).
 - **Full hole-punching:** direct NAT-to-NAT task traffic via UDP
   hole-punching alongside the relay.
 - **Harder isolation:** container/WASM runner, filesystem and network
   namespaces, real GPU quotas.
+- **ffmpeg & heavy workloads:** capability-gated audio/video transcoding,
+  following the `sci.matmul` auto-advertise pattern.
 - **Trained-weight shards:** load real GGUF/safetensors weights into the
   `ai.shard` path so the fleet serves an actual trained model (the sharding,
   verification and encryption machinery is already in place via `kemi shard`).
