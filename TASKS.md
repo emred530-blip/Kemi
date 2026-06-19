@@ -1,5 +1,11 @@
 # Kemi — Task Backlog
 
+**Status: 1.0.0 released.** 14 of 18 backlog items shipped (T1, T3–T7,
+T11, T13–T18). The four still open need things this sandbox can't
+genuinely test — real NATs (T2), `ffmpeg` (T8), `wasmtime` (T9) — or are
+post-1.0 polish (T10 fleet map, T12 bilingual dashboard). They stay as the
+post-1.0 roadmap rather than untested code.
+
 Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 
 ## A — Network & Protocol
