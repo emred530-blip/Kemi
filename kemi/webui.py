@@ -81,6 +81,32 @@ class WebUI:
     def url(self) -> str:
         return f"http://{self.host}:{self.port}/"
 
+    def _prometheus(self) -> str:
+        """Prometheus text-format metrics for fleet operators (T13)."""
+        node = self.node
+        balance = node.ledger.balance(node.identity.node_id)
+        earned = node.ledger.total_earned(node.identity.node_id)
+        lines = [
+            "# HELP kemi_balance Current credit balance",
+            "# TYPE kemi_balance gauge",
+            f"kemi_balance {balance}",
+            "# HELP kemi_total_earned Lifetime credits earned",
+            "# TYPE kemi_total_earned counter",
+            f"kemi_total_earned {earned}",
+            "# HELP kemi_ledger_txs Transactions in the local replica",
+            "# TYPE kemi_ledger_txs gauge",
+            f"kemi_ledger_txs {node.ledger.tx_count()}",
+            "# HELP kemi_dht_contacts Known DHT contacts",
+            "# TYPE kemi_dht_contacts gauge",
+            f"kemi_dht_contacts {len(node.dht.table)}",
+            "# HELP kemi_relay_sessions Relay sessions hosted",
+            "# TYPE kemi_relay_sessions gauge",
+            f"kemi_relay_sessions {len(node._relay_sessions)}",
+        ]
+        for key, value in node.metrics.items():
+            lines += [f"# TYPE kemi_{key} counter", f"kemi_{key} {value}"]
+        return "\n".join(lines) + "\n"
+
     def _invite_code(self) -> str:
         from .cli import _guess_lan_ip
         from .invite import make_invite
@@ -323,6 +349,9 @@ class WebUI:
             await self._respond(writer, 200, _PAGE, content_type="text/html; charset=utf-8")
         elif method == "GET" and path == "/api/state":
             await self._respond(writer, 200, self._state())
+        elif method == "GET" and path == "/metrics":
+            await self._respond(writer, 200, self._prometheus(),
+                                content_type="text/plain; version=0.0.4")
         elif method == "GET" and path.startswith("/api/job/") and path.endswith("/results"):
             job_id = path[len("/api/job/"):-len("/results")]
             entry = self._jobs.get(job_id)

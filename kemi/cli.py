@@ -105,6 +105,7 @@ async def _cmd_node(args: argparse.Namespace) -> int:
         ai_backend=ai_backend,
         force_relay=args.force_relay,
         lan=args.lan,
+        dynamic_price=args.dynamic_price,
     )
     await node.start()
     role = "provider" if args.provide else "peer"
@@ -496,6 +497,31 @@ async def _cmd_chat(args: argparse.Namespace) -> int:
         await node.stop()
 
 
+async def _cmd_service(args: argparse.Namespace) -> int:
+    from .service import install
+
+    extra = []
+    if args.peer:
+        for host, port in args.peer:
+            extra += ["--peer", f"{host}:{port}"]
+    if args.price != 1.0:
+        extra += ["--price", str(args.price)]
+    if args.ai_backend != "mock":
+        extra += ["--ai-backend", args.ai_backend]
+    try:
+        path, content, hint = install(extra, write=not args.dry_run)
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if args.dry_run:
+        print(content)
+        return 0
+    print(f"✓ service unit written to {path}")
+    print(f"  activate it with:\n    {hint}")
+    print("  your ship will now rejoin the fleet automatically after reboot.")
+    return 0
+
+
 async def _cmd_doctor(args: argparse.Namespace) -> int:
     from .doctor import render, run_checks
 
@@ -561,6 +587,17 @@ def build_parser() -> argparse.ArgumentParser:
                    help="task to list models for (ai.generate or ai.embed)")
     p.set_defaults(func=_cmd_models)
 
+    p = sub.add_parser("service", aliases=["servis"],
+                       help="install an auto-start service (systemd/launchd)")
+    p.add_argument("--peer", type=_parse_endpoint, action="append", default=[],
+                   metavar="HOST:PORT", help="peer(s) the service should join")
+    p.add_argument("--price", type=float, default=1.0)
+    p.add_argument("--ai-backend", default="mock",
+                   choices=("mock", "ollama", "transformers", "none"))
+    p.add_argument("--dry-run", action="store_true",
+                   help="print the unit instead of installing it")
+    p.set_defaults(func=_cmd_service)
+
     p = sub.add_parser("doctor", aliases=["tani"],
                        help="diagnose this machine's fleet readiness")
     p.add_argument("--peer", type=_parse_endpoint, action="append", default=[],
@@ -601,6 +638,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="auto-discover ships on the local network")
     p.add_argument("--open", action="store_true",
                    help="open the dashboard in your browser automatically")
+    p.add_argument("--dynamic-price", action="store_true",
+                   help="surge the advertised price with load (base price stays the floor)")
     p.set_defaults(func=_cmd_node)
 
     p = sub.add_parser("app", aliases=["uygulama"],

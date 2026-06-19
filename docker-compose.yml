@@ -1,0 +1,29 @@
+# A ready-to-run 3-ship Kemi fleet:
+#   docker compose up --build
+# Then open the dashboard at http://localhost:8080
+#
+# 'bootstrap' is the entry point; the two providers join through it and share
+# compute. Scale the providers with:  docker compose up --scale provider=5
+services:
+  bootstrap:
+    build: .
+    command: >
+      kemi node --port 7700 --ui 8080 --ui-host 0.0.0.0
+      --identity /data/id.json --ledger /data/ledger.db --reputation /data/rep.db
+    ports:
+      - "7700:7700/tcp"
+      - "7700:7700/udp"
+      - "8080:8080"
+    volumes:
+      - bootstrap-data:/data
+
+  provider:
+    build: .
+    command: >
+      kemi node --provide --port 7700 --peer bootstrap:7700
+      --identity /data/id.json --ledger /data/ledger.db --reputation /data/rep.db
+    depends_on:
+      - bootstrap
+
+volumes:
+  bootstrap-data:

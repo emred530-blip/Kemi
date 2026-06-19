@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.14.0 — Operational maturity
+- Result cache (T4): providers serve identical deterministic work from a
+  content-addressed LRU cache — the consumer still pays, the provider saves
+  CPU. `ai.generate` is never cached.
+- Metrics (T13): per-node counters (chunks served/failed, credits earned,
+  cache hits, payments rejected) in `node.info` and a Prometheus `/metrics`
+  endpoint on the dashboard.
+- Dynamic pricing (T16): `--dynamic-price` surges the advertised price with
+  load (up to 2x at full occupancy); the base price stays the floor a
+  provider will always accept, so stale-record consumers are never rejected.
+- `kemi service` (T14): generate and install a systemd (Linux) or launchd
+  (macOS) unit so a provider rejoins the fleet after reboot.
+- Docker (T15): `Dockerfile` and `docker-compose.yml` for a one-command
+  containerised fleet (`docker compose up`).
+- SPEC.md (T3): a complete protocol specification for writing clients in
+  other languages.
+
 ## 0.13.0 — No coding required
 - `kemi app` (alias `uygulama`): one command starts a sharing node and
   opens the dashboard in the browser — the no-terminal-after-this mode.

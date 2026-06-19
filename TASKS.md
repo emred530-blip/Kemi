@@ -8,8 +8,8 @@ Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 |----|--------|------|--------|--------|
 | T1 | ⬜ | **Stake-weighted witness committees** — weight committee membership by earned credits on top of PoW; raises the economic cost of Sybil attacks on payment finality | High | Medium |
 | T2 | ⬜ | **UDP hole-punching** — direct NAT-to-NAT task traffic coordinated via the DHT, relay stays as fallback; cuts relay load and latency | High | High |
-| T3 | ⬜ | **Protocol specification (SPEC.md)** — wire formats, DHT keys, tx/envelope schemas, witness flow; enables clients in other languages | Medium | Medium |
-| T4 | ⬜ | **Result cache** — content-addressed cache of (task, items, params) results on providers; identical work is answered instantly and cheaper | Medium | Medium |
+| T3 | ✅ | **Protocol specification (SPEC.md)** — wire formats, DHT keys, tx/envelope schemas, witness flow; enables clients in other languages *(v0.14)* | Medium | Medium |
+| T4 | ✅ | **Result cache** — content-addressed LRU of (task, items, params) results on providers; identical work served instantly *(v0.14)* | Medium | Medium |
 
 ## B — AI
 
@@ -38,15 +38,15 @@ Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 
 | ID | Status | Task | Impact | Effort |
 |----|--------|------|--------|--------|
-| T13 | ⬜ | **Metrics & structured logs** — Prometheus-format `/api/metrics`, JSON log option; what fleet operators need | Medium | Low |
-| T14 | ⬜ | **Service install** — `kemi service install` generating systemd/launchd units so providers survive reboots | Medium | Low |
-| T15 | ⬜ | **Docker image + compose fleet** — one-command containerised fleet for server operators | Medium | Low |
+| T13 | ✅ | **Metrics & structured logs** — Prometheus `/metrics`, per-node counters in node.info *(v0.14)* | Medium | Low |
+| T14 | ✅ | **Service install** — `kemi service` generates systemd/launchd units so providers survive reboots *(v0.14)* | Medium | Low |
+| T15 | ✅ | **Docker image + compose fleet** — one-command containerised fleet *(v0.14)* | Medium | Low |
 
 ## F — Economy & Security
 
 | ID | Status | Task | Impact | Effort |
 |----|--------|------|--------|--------|
-| T16 | ⬜ | **Dynamic pricing** — providers auto-adjust price from their load/queue depth; market finds equilibrium | Medium | Medium |
+| T16 | ✅ | **Dynamic pricing** — `--dynamic-price` surges price with load; base stays the floor *(v0.14)* | Medium | Medium |
 | T17 | ⬜ | **Economy simulation report** — model the genesis faucet, credit sinks and long-run inflation; recommend parameters | Medium | Medium |
 | T18 | ✅ | **Protocol fuzzing pass** — malformed-message matrix across every TCP/UDP handler; crash-free guarantee under garbage input *(v0.11)* | High | Medium |
 

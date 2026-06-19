@@ -28,6 +28,7 @@ import random
 import shutil
 import subprocess
 import time
+from collections import OrderedDict
 from typing import Any
 
 from .ai_backends import (AIBackend, AIBackendError, backend_model, load_backend,
@@ -51,6 +52,9 @@ GOSSIP_FANOUT = 3
 GOSSIP_INTERVAL = 3.0
 RELAY_FORWARD_TIMEOUT = 150.0
 RELAY_RECONNECT_DELAY = 2.0
+
+# Tasks whose output may legitimately differ between runs must not be cached.
+NON_CACHEABLE = frozenset({"ai.generate"})
 
 # Witness committee: before accepting a payment, a provider asks the nodes
 # DHT-closest to sha256("kemi:witness:" + sender) to lock and co-sign the
@@ -194,6 +198,7 @@ class PeerNode:
         lan: bool = False,
         limits: Limits | None = None,
         prune_above: int | None = None,
+        dynamic_price: bool = False,
     ):
         self.identity = identity
         self.host = host
@@ -215,6 +220,8 @@ class PeerNode:
 
         self.provide = provide
         self.price = price
+        self.dynamic_price = dynamic_price
+        self._active_chunks = 0
         self.max_workers = max_workers or (os.cpu_count() or 1)
         self.task_timeout = task_timeout
         self.sandbox = sandbox
@@ -237,8 +244,25 @@ class PeerNode:
         self._relay_endpoint: tuple[str, int] | None = None  # our relay, if NATed
         self._running = False
         self._closed = False
+        # -- operational metrics (T13) and a content-addressed result cache (T4)
+        self.metrics: dict[str, float] = {
+            "chunks_served": 0, "chunks_failed": 0, "credits_earned": 0.0,
+            "cache_hits": 0, "cache_misses": 0, "payments_rejected": 0,
+            "bytes_in": 0, "bytes_out": 0,
+        }
+        self._result_cache: "OrderedDict[str, list]" = OrderedDict()
+        self._result_cache_max = 512
 
     # ------------------------------------------------------------------ basics
+
+    def effective_price(self) -> float:
+        """Advertised price. With dynamic pricing on, it surges with load
+        (up to 2x at full occupancy) so the market sheds work to idle ships;
+        the base price stays the floor the provider will accept."""
+        if not self.dynamic_price or self.max_workers <= 0:
+            return self.price
+        load = min(1.0, self._active_chunks / self.max_workers)
+        return round(self.price * (1.0 + load), 6)
 
     @property
     def supported_tasks(self) -> list[str]:
@@ -386,13 +410,14 @@ class PeerNode:
             return ok(
                 node_id=self.identity.node_id,
                 provide=self.provide,
-                price=self.price,
+                price=self.effective_price(),
                 tasks=self.supported_tasks if self.provide else [],
                 resources=self.resources,
                 model=backend_model(self._task_context.get("ai_backend")),
                 ledger_txs=self.ledger.tx_count(),
                 dht_contacts=len(self.dht.table),
                 relayed=self._relay_endpoint is not None,
+                metrics=dict(self.metrics),
             )
         if msg_type == "ledger.pull":
             try:
@@ -658,7 +683,7 @@ class PeerNode:
             self.identity,
             host=self._advertised_host(),
             port=self.port,
-            price=self.price,
+            price=self.effective_price(),
             tasks=self.supported_tasks,
             resources=self.resources,
             relay=relay,
@@ -720,30 +745,41 @@ class PeerNode:
         expected = round(self.price * len(items), 6)
         sender, problem = self._validate_payment(payment, expected)
         if problem is not None:
+            self.metrics["payments_rejected"] += 1
             return error("payment_rejected", problem)
         witnessed, veto = await self._witness_check(payment, sender)
         if not witnessed:
+            self.metrics["payments_rejected"] += 1
             return error("payment_rejected", veto)
 
         async with self._work_semaphore:
+            self._active_chunks += 1
             try:
                 results = await self._execute_chunk(task, items, params)
             except (TaskError, SandboxError) as exc:
+                self.metrics["chunks_failed"] += 1
                 return error("task_failed", str(exc))
             except asyncio.TimeoutError:
+                self.metrics["chunks_failed"] += 1
                 return error("task_timeout", f"chunk exceeded {self.task_timeout}s")
+            finally:
+                self._active_chunks -= 1
 
         # Payment before result: apply the signed transfer to our replica and
         # gossip it. Only then does the consumer get the result.
         status = self.ledger.add_tx(payment)
         if status == "invalid":
+            self.metrics["payments_rejected"] += 1
             return error("payment_rejected", "transfer failed validation")
         if status == "conflict":
             self.reputation.record(sender, "double_spend")
             self.gossip_tx(payment)  # spread the evidence
+            self.metrics["payments_rejected"] += 1
             return error("payment_rejected", "double-spend detected; account flagged")
         self.gossip_tx(payment)
         self.reputation.record(sender, "chunk_ok")
+        self.metrics["chunks_served"] += 1
+        self.metrics["credits_earned"] += expected
         if box_key is not None:
             return ok(enc=seal(box_key, canonical({"results": results})), charged=expected)
         return ok(results=results, charged=expected)
@@ -773,14 +809,32 @@ class PeerNode:
 
     async def _execute_chunk(self, task: str, items: list[Any],
                              params: dict[str, Any]) -> list[Any]:
+        # Content-addressed result cache (T4): identical deterministic work is
+        # answered from memory. The consumer still pays — the saving is the
+        # provider's CPU, which lets popular work get cheaper over time.
+        cache_key = None
+        if task not in NON_CACHEABLE:
+            cache_key = digest({"t": task, "i": items, "p": params})
+            cached = self._result_cache.get(cache_key)
+            if cached is not None:
+                self._result_cache.move_to_end(cache_key)
+                self.metrics["cache_hits"] += 1
+                return cached
+            self.metrics["cache_misses"] += 1
         if self.sandbox and task not in UNSANDBOXED_TASKS:
-            return await run_sandboxed(task, items, params,
-                                       timeout=self.task_timeout,
-                                       mem_mb=self.sandbox_mem_mb)
-        return await asyncio.wait_for(
-            asyncio.to_thread(run_task, task, items, params, self._task_context),
-            timeout=self.task_timeout,
-        )
+            results = await run_sandboxed(task, items, params,
+                                          timeout=self.task_timeout,
+                                          mem_mb=self.sandbox_mem_mb)
+        else:
+            results = await asyncio.wait_for(
+                asyncio.to_thread(run_task, task, items, params, self._task_context),
+                timeout=self.task_timeout,
+            )
+        if cache_key is not None:
+            self._result_cache[cache_key] = results
+            while len(self._result_cache) > self._result_cache_max:
+                self._result_cache.popitem(last=False)
+        return results
 
     # --------------------------------------------------------------- streaming
 
