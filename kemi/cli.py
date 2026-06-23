@@ -165,10 +165,16 @@ async def _cmd_app(args: argparse.Namespace) -> int:
         node.bootstrap_peers.extend(p for p in args.peer if p not in node.bootstrap_peers)
     await node.start()
     name = ship_name(node.identity.node_id)
-    ui = WebUI(node, host="127.0.0.1", port=args.ui)
+    # --phone binds the dashboard to the LAN so a phone on the same Wi-Fi can
+    # open it and install the PWA; default stays localhost-only for safety.
+    ui_host = "0.0.0.0" if args.phone else "127.0.0.1"
+    ui = WebUI(node, host=ui_host, port=args.ui)
     await ui.start()
     print(f"\n  ⚓ Your ship '{name}' is sailing.")
-    print(f"  ✦ Open this in your browser:  {ui.url}")
+    print(f"  ✦ Open this in your browser:  http://127.0.0.1:{ui.port}/")
+    if args.phone:
+        print(f"  ✦ On your phone (same Wi-Fi):  http://{_guess_lan_ip()}:{ui.port}/")
+        print("    then use the browser's “Add to Home Screen” to install the app.")
     print("  ✦ Everything happens there — chat with the AI, invite friends, watch the fleet.")
     print("  ✦ Keep this window open. Press Ctrl+C to stop.\n")
     try:
@@ -666,6 +672,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--price", type=float, default=1.0)
     p.add_argument("--port", type=int, default=7700)
     p.add_argument("--ui", type=int, default=8080, metavar="PORT")
+    p.add_argument("--phone", action="store_true",
+                   help="expose the dashboard on your LAN so a phone can install the PWA")
     p.add_argument("--ai-backend", default="mock", choices=("mock", "ollama", "transformers", "none"))
     p.add_argument("--identity", default=DEFAULT_IDENTITY_PATH)
     p.add_argument("--ledger", default=DEFAULT_LEDGER_PATH)

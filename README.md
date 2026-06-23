@@ -73,6 +73,13 @@ happens in your browser.
 Prefer double-clicking? The `launchers/` folder has **Kemi-Start.command**
 (macOS) and **Kemi-Start.bat** (Windows) — double-click to launch.
 
+**On your phone (iOS / Android):** run `kemi app --phone` on a desktop, then
+open the shown `http://<your-ip>:8080/` address in your phone's browser and
+use **Add to Home Screen / Install** — the dashboard installs as an app (a
+PWA) and uses the fleet. See **[PLATFORMS.md](PLATFORMS.md)** for the full
+map of what runs where (Linux/macOS/Windows run full nodes; iOS/Android run
+the client).
+
 ## Join in 60 seconds
 
 No required dependencies (Python ≥ 3.10 standard library is enough;
@@ -378,6 +385,8 @@ the same way. New capabilities are added by registering tasks in
 | `kemi/chat.py` | `kemi chat`: streaming conversational REPL |
 | `kemi/doctor.py` | `kemi doctor`: machine readiness diagnostics |
 | `kemi/cli.py`, `kemi/demo.py` | Bilingual CLI and the end-to-end demo |
+| `packaging/` | PyInstaller recipe for standalone desktop apps (`.app`/`.exe`) |
+| `scripts/install.sh`, `install.ps1` | One-line installers (Unix / Windows) |
 
 ## Tests
 

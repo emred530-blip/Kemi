@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0 — Runs everywhere (iOS, Android, macOS, Windows, Linux)
+- Progressive Web App: the dashboard is now installable on iOS (Add to Home
+  Screen), Android (Install app) and every desktop browser — manifest,
+  offline-tolerant service worker, app icons (pure-Python PNG, no Pillow),
+  mobile-responsive layout, and iOS no-zoom inputs.
+- `kemi app --phone` exposes the dashboard on the LAN so a phone on the same
+  Wi-Fi can open and install it; localhost-only by default otherwise.
+- Windows: `scripts/install.ps1` PowerShell one-line installer.
+- Standalone desktop apps (no Python needed): PyInstaller recipe in
+  `packaging/` (`.app` on macOS, `.exe` on Windows, binary on Linux) via
+  `sh packaging/build.sh`.
+- PLATFORMS.md: the honest map of full-node vs client support per OS.
+
+
 ## 1.0.0 — Release
 First stable release. A fully decentralised peer-to-peer compute-sharing
 network: Kademlia DHT discovery, Ed25519 proof-of-work identities, a

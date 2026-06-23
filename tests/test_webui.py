@@ -60,6 +60,34 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("text/plain", ctype)
         self.assertIn(b"kemi_balance", body)
 
+    async def test_pwa_assets_served(self):
+        # manifest, service worker, and both icon formats make it installable
+        # on iOS / Android / desktop as a Progressive Web App
+        status, ctype, body = await asyncio.to_thread(
+            _http, "GET", self.base + "/manifest.webmanifest")
+        self.assertEqual(status, 200)
+        self.assertIn("manifest", ctype)
+        self.assertIn(b'"standalone"', body)
+
+        status, ctype, _ = await asyncio.to_thread(_http, "GET", self.base + "/sw.js")
+        self.assertEqual(status, 200)
+        self.assertIn("javascript", ctype)
+
+        status, ctype, body = await asyncio.to_thread(_http, "GET", self.base + "/icon.png")
+        self.assertEqual(status, 200)
+        self.assertIn("image/png", ctype)
+        self.assertEqual(body[:8], b"\x89PNG\r\n\x1a\n")
+
+        status, ctype, _ = await asyncio.to_thread(_http, "GET", self.base + "/icon.svg")
+        self.assertEqual(status, 200)
+        self.assertIn("image/svg", ctype)
+
+    async def test_page_is_mobile_ready(self):
+        _, _, body = await asyncio.to_thread(_http, "GET", self.base + "/")
+        self.assertIn(b"manifest.webmanifest", body)
+        self.assertIn(b"apple-mobile-web-app-capable", body)
+        self.assertIn(b"max-width:640px", body)  # responsive layout
+
     async def test_state_api(self):
         # wait for the provider cache to fill
         for _ in range(40):

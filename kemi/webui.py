@@ -17,6 +17,7 @@ only expose it beyond localhost behind a reverse proxy you trust.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import secrets
@@ -40,6 +41,34 @@ MAX_JOBS_KEPT = 50
 def _preview(results: list[Any]) -> list[Any]:
     """First items only - the full set is downloadable per job."""
     return results[:50]
+
+
+@functools.lru_cache(maxsize=1)
+def _icon_png() -> bytes:
+    """A 512x512 app icon (dark brand square + a green disc) encoded as PNG in
+    pure Python — no Pillow, so it works in a stdlib-only install."""
+    import struct
+    import zlib
+
+    size, r = 512, 150
+    cx = cy = size / 2
+    bg, fg = (13, 17, 23), (63, 185, 80)
+    raw = bytearray()
+    for y in range(size):
+        raw.append(0)  # PNG filter type 0 for this scanline
+        for x in range(size):
+            inside = (x - cx) ** 2 + (y - cy) ** 2 <= r * r
+            raw += bytes(fg if inside else bg)
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    header = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)  # 8-bit RGB
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+            + chunk(b"IEND", b""))
 
 
 class WebUI:
@@ -347,6 +376,18 @@ class WebUI:
                      path: str, body: bytes) -> None:
         if method == "GET" and path in ("/", "/index.html"):
             await self._respond(writer, 200, _PAGE, content_type="text/html; charset=utf-8")
+        elif method == "GET" and path == "/manifest.webmanifest":
+            await self._respond(writer, 200, _MANIFEST,
+                                content_type="application/manifest+json")
+        elif method == "GET" and path == "/sw.js":
+            await self._respond(writer, 200, _SERVICE_WORKER,
+                                content_type="text/javascript")
+        elif method == "GET" and path == "/icon.svg":
+            await self._respond(writer, 200, _ICON_SVG,
+                                content_type="image/svg+xml")
+        elif method == "GET" and path == "/icon.png":
+            await self._respond(writer, 200, _icon_png(),
+                                content_type="image/png")
         elif method == "GET" and path == "/api/state":
             await self._respond(writer, 200, self._state())
         elif method == "GET" and path == "/metrics":
@@ -405,7 +446,15 @@ class WebUI:
 _PAGE = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Kemi">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
 <title>kemi — fleet panel</title>
 <style>
   :root { --bg:#0d1117; --card:#161b22; --line:#21262d; --fg:#e6edf3;
@@ -420,6 +469,14 @@ _PAGE = """<!doctype html>
   header .dim, .dim { color:var(--dim); }
   main { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr));
          gap:14px; padding:14px 22px; }
+  @media (max-width:640px) {
+    main { grid-template-columns:1fr; padding:10px; gap:10px; }
+    header { padding:10px; gap:8px; }
+    header h1 { font-size:16px; }
+    header .balance { font-size:18px; }
+    #welcome { padding:6px 10px; font-size:13px; }
+    input, select, textarea, button { font-size:16px; }  /* avoid iOS zoom */
+  }
   section { background:var(--card); border:1px solid var(--line);
             border-radius:8px; padding:14px 16px; overflow-x:auto; }
   h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em;
@@ -677,8 +734,63 @@ $('#invitebtn').addEventListener('click', async () => {
   window.prompt('Send this to a friend — they paste it and run it to join your fleet:', cmd);
 });
 
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
 refresh();
 setInterval(refresh, 500);
 </script>
 </body></html>
 """
+
+_MANIFEST = json.dumps({
+    "name": "Kemi — fleet panel",
+    "short_name": "Kemi",
+    "description": "Decentralised peer-to-peer compute & AI on the fleet",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#0d1117",
+    "theme_color": "#0d1117",
+    "icons": [
+        {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml",
+         "purpose": "any"},
+        {"src": "/icon.png", "sizes": "512x512", "type": "image/png",
+         "purpose": "any maskable"},
+    ],
+})
+
+# A tiny offline-tolerant service worker: serve the shell from cache when the
+# network is down so the installed app still opens (data still needs a peer).
+_SERVICE_WORKER = """
+const CACHE = 'kemi-v1';
+self.addEventListener('install', (e) => {
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/'])));
+  self.skipWaiting();
+});
+self.addEventListener('activate', (e) => self.clients.claim());
+self.addEventListener('fetch', (e) => {
+  const url = new URL(e.request.url);
+  if (url.pathname.startsWith('/api/')) return;  // always live for data
+  e.respondWith(
+    fetch(e.request).then((r) => {
+      const copy = r.clone();
+      caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+      return r;
+    }).catch(() => caches.match(e.request).then((m) => m || caches.match('/')))
+  );
+});
+"""
+
+# Ship icon: an anchor on the brand background. SVG scales everywhere; the
+# PNG is rendered from it on demand for platforms that insist on a raster.
+_ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#0d1117"/>
+  <g fill="none" stroke="#3fb950" stroke-width="28" stroke-linecap="round"
+     stroke-linejoin="round">
+    <circle cx="256" cy="150" r="34"/>
+    <line x1="256" y1="184" x2="256" y2="396"/>
+    <line x1="168" y1="232" x2="344" y2="232"/>
+    <path d="M150 300 a106 106 0 0 0 212 0"/>
+  </g>
+</svg>"""
