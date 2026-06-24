@@ -56,6 +56,9 @@ RELAY_RECONNECT_DELAY = 2.0
 # Tasks whose output may legitimately differ between runs must not be cached.
 NON_CACHEABLE = frozenset({"ai.generate"})
 
+# How often (seconds) transient reputation evidence decays toward neutral.
+REP_DECAY_INTERVAL = 3600.0
+
 # Witness committee: before accepting a payment, a provider asks the nodes
 # DHT-closest to sha256("kemi:witness:" + sender) to lock and co-sign the
 # transfer. Two transfers racing the same seq hit the SAME committee, so at
@@ -244,6 +247,7 @@ class PeerNode:
         self._relay_endpoint: tuple[str, int] | None = None  # our relay, if NATed
         self._running = False
         self._closed = False
+        self._last_rep_decay = time.monotonic()
         # -- operational metrics (T13) and a content-addressed result cache (T4)
         self.metrics: dict[str, float] = {
             "chunks_served": 0, "chunks_failed": 0, "credits_earned": 0.0,
@@ -633,6 +637,10 @@ class PeerNode:
                 self._gossip_cursors.clear()  # peers re-sync via snapshots
                 log.info("ledger pruned: %d transactions folded into the baseline",
                          pruned)
+            now = time.monotonic()
+            if now - self._last_rep_decay > REP_DECAY_INTERVAL:
+                self._last_rep_decay = now
+                self.reputation.decay()  # transient marks fade; condemnation stays
 
     async def _bootstrap_from_snapshot(self) -> None:
         """Fast bootstrap: adopt a checkpoint instead of replaying history.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0 — Wallet and fairer reputation
+- `kemi wallet` / `cuzdan`: balance, rank and a recent transaction history
+  (direction, counterparty ship, signed amount) for your ship.
+- Reputation decay: transient evidence (failed/mismatched chunks) fades over
+  time so a node recovers from an old blip, while double-spend condemnation
+  stays permanent. Decays hourly on running nodes; legacy reputation DBs
+  migrate automatically.
+
 ## 1.4.0 — OpenAI-compatible gateway
 - `kemi serve`: a localhost endpoint speaking the OpenAI REST API
   (`/v1/chat/completions` incl. streaming SSE, `/v1/embeddings`, `/v1/models`)

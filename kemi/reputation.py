@@ -36,8 +36,14 @@ class ReputationStore:
             " node_id TEXT PRIMARY KEY,"
             " good REAL NOT NULL DEFAULT 0,"
             " bad REAL NOT NULL DEFAULT 0,"
-            " events INTEGER NOT NULL DEFAULT 0)"
+            " events INTEGER NOT NULL DEFAULT 0,"
+            " condemned INTEGER NOT NULL DEFAULT 0)"
         )
+        # migrate older stores that predate the condemned column
+        cols = {r[1] for r in self._db.execute("PRAGMA table_info(reputation)")}
+        if "condemned" not in cols:
+            self._db.execute("ALTER TABLE reputation ADD COLUMN "
+                             "condemned INTEGER NOT NULL DEFAULT 0")
         self._db.commit()
 
     def close(self) -> None:
@@ -45,12 +51,23 @@ class ReputationStore:
 
     def record(self, node_id: str, event: str) -> None:
         good, bad = WEIGHTS[event]
+        condemned = 1 if event == "double_spend" else 0
         self._db.execute(
-            "INSERT INTO reputation (node_id, good, bad, events) VALUES (?, ?, ?, 1)"
+            "INSERT INTO reputation (node_id, good, bad, events, condemned)"
+            " VALUES (?, ?, ?, 1, ?)"
             " ON CONFLICT(node_id) DO UPDATE SET"
-            " good = good + excluded.good, bad = bad + excluded.bad, events = events + 1",
-            (node_id, good, bad),
+            " good = good + excluded.good, bad = bad + excluded.bad,"
+            " events = events + 1, condemned = max(condemned, excluded.condemned)",
+            (node_id, good, bad, condemned),
         )
+        self._db.commit()
+
+    def decay(self, factor: float = 0.9) -> None:
+        """Fade transient evidence so a node recovers from an old blip over
+        time. Double-spend condemnation is objective and never decays."""
+        factor = max(0.0, min(1.0, factor))
+        self._db.execute("UPDATE reputation SET good = good * ?, bad = bad * ?",
+                         (factor, factor))
         self._db.commit()
 
     def score(self, node_id: str) -> float:
@@ -64,12 +81,13 @@ class ReputationStore:
 
     def is_banned(self, node_id: str) -> bool:
         row = self._db.execute(
-            "SELECT good, bad, events FROM reputation WHERE node_id = ?", (node_id,)
+            "SELECT good, bad, events, condemned FROM reputation WHERE node_id = ?",
+            (node_id,)
         ).fetchone()
         if row is None:
             return False
-        good, bad, events = row
-        if bad >= WEIGHTS["double_spend"][1]:
+        good, bad, events, condemned = row
+        if condemned:                       # double-spend: permanent
             return True
         score = (good + 1.0) / (good + bad + 2.0)
         return events >= MIN_EVENTS_FOR_BAN and score < BAN_THRESHOLD

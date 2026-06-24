@@ -242,6 +242,25 @@ class GossipLedger:
             out.append({key: payload[key] for key in ("from", "to", "amount", "seq", "ts")})
         return out
 
+    def history(self, node_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        """This account's own transfers (sent and received), newest first,
+        each tagged with direction and signed amount (for a wallet view)."""
+        rows = self._db.execute(
+            "SELECT envelope FROM txs WHERE sender = ? OR recipient = ? "
+            "ORDER BY rowid DESC LIMIT ?", (node_id, node_id, limit)
+        ).fetchall()
+        out = []
+        for (envelope_json,) in rows:
+            p = json.loads(envelope_json)["payload"]
+            sent = p["from"] == node_id
+            out.append({
+                "direction": "sent" if sent else "received",
+                "counterparty": p["to"] if sent else p["from"],
+                "delta": _round(-p["amount"] if sent else p["amount"]),
+                "amount": p["amount"], "seq": p["seq"], "ts": p["ts"],
+            })
+        return out
+
     def double_spenders(self) -> list[str]:
         """Accounts with provable double-spends (conflicting seq evidence)."""
         rows = self._db.execute(

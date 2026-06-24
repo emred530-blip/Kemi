@@ -247,6 +247,32 @@ async def _cmd_balance(args: argparse.Namespace) -> int:
         await node.stop()
 
 
+async def _cmd_wallet(args: argparse.Namespace) -> int:
+    """Show this ship's balance, rank and recent transactions."""
+    from .names import rank_for, ship_name
+
+    node = await _with_ephemeral_node(args)
+    try:
+        await node.sync_ledger()
+        me = node.identity.node_id
+        earned = node.ledger.total_earned(me)
+        title, insignia, nxt = rank_for(earned)
+        print(f"⚓ {ship_name(me)}   {insignia} {title}")
+        print(f"  balance: {node.ledger.balance(me):.2f} credits   "
+              f"earned: {earned:.2f}" + (f"   next rank at {nxt:.0f}" if nxt else ""))
+        history = node.ledger.history(me, limit=args.limit)
+        if not history:
+            print("  no transactions yet")
+        for tx in history:
+            sign = "−" if tx["direction"] == "sent" else "+"
+            other = ship_name(tx["counterparty"])
+            verb = "to  " if tx["direction"] == "sent" else "from"
+            print(f"  {sign}{tx['amount']:.2f}  {verb} {other}")
+        return 0
+    finally:
+        await node.stop()
+
+
 async def _cmd_serve(args: argparse.Namespace) -> int:
     """Run the OpenAI-compatible gateway so any AI tool can use the fleet."""
     from .openai_gateway import OpenAIGateway
@@ -751,6 +777,12 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p)
     p.add_argument("--task", default=None, help="only providers offering this task")
     p.set_defaults(func=_cmd_providers)
+
+    p = sub.add_parser("wallet", aliases=["cuzdan"],
+                       help="show balance, rank and recent transactions")
+    _add_common(p)
+    p.add_argument("--limit", type=int, default=20)
+    p.set_defaults(func=_cmd_wallet)
 
     p = sub.add_parser("balance", aliases=["bakiye"], help="show credit balance")
     _add_common(p)
