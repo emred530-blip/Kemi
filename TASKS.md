@@ -1,10 +1,10 @@
 # Kemi — Task Backlog
 
-**Status: 1.0.0 released.** 14 of 18 backlog items shipped (T1, T3–T7,
-T11, T13–T18). The four still open need things this sandbox can't
-genuinely test — real NATs (T2), `ffmpeg` (T8), `wasmtime` (T9) — or are
-post-1.0 polish (T10 fleet map, T12 bilingual dashboard). They stay as the
-post-1.0 roadmap rather than untested code.
+**Status: 1.2.0 released.** 16 of 18 backlog items shipped. Still open:
+T2 (UDP hole-punching) and T9 (WASM runner) need things this sandbox can't
+genuinely test — real NATs and `wasmtime` — so they stay on the roadmap
+rather than ship as untested code. T8 (ffmpeg) is implemented capability-
+gated. T10 (fleet map) shipped in v1.3.
 
 Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 
@@ -29,14 +29,14 @@ Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 
 | ID | Status | Task | Impact | Effort |
 |----|--------|------|--------|--------|
-| T8 | ⬜ | **ffmpeg transcoding task** — capability-gated audio/video conversion with chunked base64 transport; the first heavyweight real-world workload | Medium | Medium |
+| T8 | ✅ | **media.transcode** — capability-gated ffmpeg audio/video transcoding (base64, no shell, format allowlist) *(v1.3)* | Medium | Medium |
 | T9 | ⬜ | **WASM runner** — run untrusted custom code safely (wasmtime, capability-gated); ends the allowlist-only limitation | High | High |
 
 ## D — Dashboard & UX
 
 | ID | Status | Task | Impact | Effort |
 |----|--------|------|--------|--------|
-| T10 | ⬜ | **Fleet map** — live network topology visualisation in the dashboard (ships, relay links, traffic) | Medium | Medium |
+| T10 | ✅ | **Fleet map** — live topology in the dashboard (ships, relay links, reputation colour) *(v1.3)* | Medium | Medium |
 | T11 | ✅ | **Job templates** — one-click presets (hash/wordcount/AI/embed/aggregate) in the dashboard *(v0.15)* | Medium | Low |
 | T12 | ✅ | **Bilingual dashboard** — TR/EN toggle for panel headings, welcome, buttons *(v1.2)* | Low | Low |
 

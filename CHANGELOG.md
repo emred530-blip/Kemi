@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0 — Fleet map, media transcoding, RAG CLI
+- Fleet map (T10): a live network-topology view in the dashboard — this ship
+  at the centre, providers on a ring, relay links dashed, coloured by
+  reputation, with per-ship tooltips.
+- Media transcoding (T8): a capability-gated `media.transcode` task (audio/
+  video via ffmpeg, base64 in/out, no shell, format allowlist) that registers
+  only on providers that have ffmpeg — the first heavyweight real workload.
+- `kemi search` / `ara`: RAG retrieval from the terminal (rank a file of
+  documents against a query over the fleet).
+
 ## 1.2.0 — RAG, bilingual dashboard, downloadable apps
 - RAG on the fleet: a `vector.search` task (cosine top-k retrieval) plus
   `Fleet.rag_search()` and `kemi search` — embed query + documents and rank

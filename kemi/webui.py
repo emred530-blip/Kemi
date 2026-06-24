@@ -575,6 +575,11 @@ _PAGE = """<!doctype html>
       <th>ship</th><th>score</th><th>good</th><th>bad</th><th>events</th>
     </tr></thead><tbody id="reputation"></tbody></table>
   </section>
+  <section>
+    <h2 data-i18n="map">Fleet map</h2>
+    <svg id="fleetmap" width="100%" height="260" viewBox="0 0 400 260"
+         preserveAspectRatio="xMidYMid meet"></svg>
+  </section>
 </main>
 <footer id="footer"></footer>
 <script>
@@ -659,6 +664,33 @@ function render(s) {
     $('#sparkline').setAttribute('points', pts.join(' '));
   }
 
+  // Fleet map: this ship at the centre, providers on a ring around it.
+  const map = $('#fleetmap');
+  const cx = 200, cy = 130, R = 95;
+  const peers = s.providers.slice(0, 16);
+  let mapSvg = '';
+  peers.forEach((p, i) => {
+    const ang = (i / Math.max(1, peers.length)) * 2 * Math.PI - Math.PI / 2;
+    const x = cx + R * Math.cos(ang), y = cy + R * Math.sin(ang);
+    const colour = p.rep >= 0.5 ? '#3fb950' : '#f85149';
+    const dash = p.relay ? ' stroke-dasharray="4 3"' : '';
+    mapSvg += `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" `
+            + `stroke="#30363d" stroke-width="1"${dash}/>`;
+    mapSvg += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7" fill="${colour}">`
+            + `<title>${esc(p.name)} · ${p.price.toFixed(2)} cr · rep ${p.rep}`
+            + `${p.relay ? ' · relay' : ''}</title></circle>`;
+    mapSvg += `<text x="${x.toFixed(1)}" y="${(y + 18).toFixed(1)}" fill="#8b949e" `
+            + `font-size="8" text-anchor="middle">${esc((p.name||'').slice(0,12))}</text>`;
+  });
+  mapSvg += `<circle cx="${cx}" cy="${cy}" r="11" fill="#1f6feb"/>`
+          + `<text x="${cx}" y="${cy + 26}" fill="#e6edf3" font-size="9" `
+          + `text-anchor="middle">${esc(s.node.name)} (you)</text>`;
+  if (!peers.length) {
+    mapSvg += `<text x="${cx}" y="${cy + 50}" fill="#8b949e" font-size="10" `
+            + `text-anchor="middle">no other ships discovered yet</text>`;
+  }
+  map.innerHTML = mapSvg;
+
   $('#txs').innerHTML = s.ledger.recent.map(t => `<tr>
     <td title="${esc(t.from)}">${esc(t.from_name || short(t.from))}</td>` +
     `<td title="${esc(t.to)}">${esc(t.to_name || short(t.to))}</td>
@@ -742,12 +774,12 @@ const I18N = {
        welcome:'Welcome aboard! Ask the AI below, or share an invite so friends pool their computers with yours.',
        providers:'Providers (live)', submit:'Submit a job',
        chat:'Chat with the fleet', ledger:'Ledger (latest transfers)',
-       reputation:'Reputation (as this node sees it)', send:'send to the fleet'},
+       reputation:'Reputation (as this node sees it)', send:'send to the fleet', map:'Fleet map'},
   tr: {panel:'filo paneli', invite:'⚓ Arkadaş davet et', credits:'kredi',
        welcome:'Hoş geldin! Aşağıdan yapay zekâya sor ya da bir davet paylaş; arkadaşların bilgisayarlarını seninkiyle birleştirsin.',
        providers:'Sağlayıcılar (canlı)', submit:'İş gönder',
        chat:'Filoyla sohbet et', ledger:'Defter (son transferler)',
-       reputation:'İtibar (bu düğümün gözünden)', send:'filoya gönder'},
+       reputation:'İtibar (bu düğümün gözünden)', send:'filoya gönder', map:'Filo haritası'},
 };
 function applyLang(lang) {
   const dict = I18N[lang] || I18N.en;

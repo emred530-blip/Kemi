@@ -17,7 +17,9 @@ import base64
 import gzip
 import hashlib
 import math
+import os
 import random
+import shutil
 from typing import Any, Callable
 
 TaskFn = Callable[[list[Any], dict[str, Any], dict[str, Any]], list[Any]]
@@ -196,6 +198,55 @@ try:  # registered only where numpy exists; the provider record advertises it
         return out
 except ImportError:  # pragma: no cover
     pass
+
+
+def _ffmpeg_args(in_path: str, out_path: str, fmt: str,
+                 extra: list[str] | None = None) -> list[str]:
+    """Build a safe ffmpeg argv: fixed flags only, no shell, allowlisted
+    output format. Kept pure so it can be unit-tested without ffmpeg."""
+    if fmt not in {"mp3", "wav", "ogg", "flac", "m4a", "mp4", "webm", "gif", "png", "jpg"}:
+        raise TaskError(f"unsupported output format: {fmt!r}")
+    args = ["ffmpeg", "-nostdin", "-y", "-i", in_path]
+    args += list(extra or [])
+    return args + [out_path]
+
+
+if shutil.which("ffmpeg"):  # capability-gated like sci.matmul (T8)
+    @register_task("media.transcode")
+    def _media_transcode(items: list[Any], params: dict[str, Any],
+                         context: dict[str, Any]) -> list[Any]:
+        """Transcode audio/video: each item is base64-encoded input bytes;
+        returns base64 output in ``params['format']``. Runs ffmpeg in a temp
+        dir with no shell. Advertised only by providers that have ffmpeg."""
+        import subprocess
+        import tempfile
+
+        fmt = str(params.get("format", "mp3"))
+        timeout = min(int(params.get("timeout", 120)), 600)
+        out = []
+        for item in items:
+            try:
+                data = base64.b64decode(str(item), validate=True)
+            except (ValueError, TypeError) as exc:
+                raise TaskError(f"bad base64 input: {exc}")
+            if len(data) > 64 * 1024 * 1024:
+                raise TaskError("input exceeds 64 MiB")
+            with tempfile.TemporaryDirectory() as tmp:
+                src = f"{tmp}/in"
+                dst = f"{tmp}/out.{fmt}"
+                with open(src, "wb") as fh:
+                    fh.write(data)
+                try:
+                    proc = subprocess.run(_ffmpeg_args(src, dst, fmt),
+                                          capture_output=True, timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    raise TaskError(f"transcode exceeded {timeout}s")
+                if proc.returncode != 0 or not os.path.exists(dst):
+                    tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()
+                    raise TaskError(tail[-1] if tail else "ffmpeg failed")
+                with open(dst, "rb") as fh:
+                    out.append(base64.b64encode(fh.read()).decode("ascii"))
+        return out
 
 
 @register_task("ai.layer")
