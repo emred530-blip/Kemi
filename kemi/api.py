@@ -108,6 +108,20 @@ class Fleet:
         return await self.run("ai.embed", texts, chunk_size=8,
                               redundancy=redundancy, model=model)
 
+    async def rag_search(self, query: str, documents: list[str], *, top_k: int = 3,
+                         model: str | None = None) -> list[dict[str, Any]]:
+        """Retrieval-augmented search over the fleet: embed the query and
+        documents (ai.embed), then rank by cosine similarity (vector.search).
+        Returns ``[{"document", "index", "score"}, ...]`` best-first."""
+        if not documents:
+            return []
+        vectors = await self.embed([query] + list(documents), model=model)
+        ranked = await self.run("vector.search",
+                                [{"q": vectors[0], "docs": vectors[1:]}],
+                                chunk_size=1)
+        return [{"document": documents[hit["index"]], **hit}
+                for hit in ranked[0][:top_k]]
+
     async def stream(self, prompt: str, *, max_tokens: int = 128,
                      chunk_timeout: float = 300.0,
                      model: str | None = None) -> AsyncIterator[str]:

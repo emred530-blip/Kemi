@@ -247,6 +247,28 @@ async def _cmd_balance(args: argparse.Namespace) -> int:
         await node.stop()
 
 
+async def _cmd_search(args: argparse.Namespace) -> int:
+    """RAG over the fleet: rank documents (one per non-empty line) against a
+    query by embedding both and cosine-ranking — all on the swarm."""
+    from .api import Fleet
+
+    text = sys.stdin.read() if args.input == "-" else Path(args.input).read_text()
+    docs = [line.strip() for line in text.splitlines() if line.strip()]
+    if not docs:
+        print("error: no documents (one per non-empty line)", file=sys.stderr)
+        return 2
+    node = await _with_ephemeral_node(args)
+    try:
+        hits = await Fleet(node).rag_search(args.query, docs, top_k=args.top_k,
+                                            model=args.model)
+        for hit in hits:
+            print(f"{hit['score']:.3f}  {hit['document']}")
+        await asyncio.sleep(0.5)
+        return 0
+    finally:
+        await node.stop()
+
+
 async def _cmd_run(args: argparse.Namespace) -> int:
     text = sys.stdin.read() if args.input == "-" else Path(args.input).read_text()
     if args.lines:
@@ -600,6 +622,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--task", default="ai.generate",
                    help="task to list models for (ai.generate or ai.embed)")
     p.set_defaults(func=_cmd_models)
+
+    p = sub.add_parser("search", aliases=["ara"],
+                       help="RAG: rank documents against a query over the fleet")
+    _add_common(p)
+    p.add_argument("--query", required=True, help="the search query")
+    p.add_argument("--input", required=True, help="documents file (one per line), or -")
+    p.add_argument("--top-k", type=int, default=5)
+    p.add_argument("--model", default=None, help="pin an embedding model")
+    p.set_defaults(func=_cmd_search)
 
     p = sub.add_parser("economy", aliases=["ekonomi"],
                        help="simulate and report on the credit economy")

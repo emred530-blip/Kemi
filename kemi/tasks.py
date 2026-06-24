@@ -255,6 +255,36 @@ def _ai_shard(items: list[Any], params: dict[str, Any], context: dict[str, Any])
     return out
 
 
+@register_task("vector.search")
+def _vector_search(items: list[Any], params: dict[str, Any], context: dict[str, Any]) -> list[Any]:
+    """Cosine top-k search — the retrieval half of RAG.
+
+    Each item is ``{"q": <query vector>, "docs": [<vector>, ...]}``; returns
+    ``[{"index": i, "score": cosine}, ...]`` sorted best-first, truncated to
+    ``params["top_k"]`` (default 5). Pure compute, deterministic — pair it
+    with ai.embed to build retrieval-augmented generation on the fleet.
+    """
+    top_k = int(params.get("top_k", 5))
+    out = []
+    for item in items:
+        if not isinstance(item, dict) or "q" not in item or "docs" not in item:
+            raise TaskError("vector.search items need {'q': vec, 'docs': [vec,...]}")
+        q = item["q"]
+        if not isinstance(q, list) or not all(isinstance(x, (int, float)) for x in q):
+            raise TaskError("query vector must be a list of numbers")
+        qn = math.sqrt(sum(x * x for x in q)) or 1.0
+        scored = []
+        for index, doc in enumerate(item["docs"]):
+            if not isinstance(doc, list) or len(doc) != len(q):
+                raise TaskError("each doc vector must match the query width")
+            dn = math.sqrt(sum(x * x for x in doc)) or 1.0
+            dot = sum(a * b for a, b in zip(q, doc))
+            scored.append({"index": index, "score": round(dot / (qn * dn), 9)})
+        scored.sort(key=lambda s: s["score"], reverse=True)
+        out.append(scored[:max(1, top_k)])
+    return out
+
+
 @register_task("ai.generate")
 def _ai_generate(items: list[Any], params: dict[str, Any], context: dict[str, Any]) -> list[Any]:
     """items: list of prompts -> list of completions via the provider's backend."""

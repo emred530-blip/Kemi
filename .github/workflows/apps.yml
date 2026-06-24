@@ -1,0 +1,55 @@
+name: Build desktop apps
+
+# On a version tag, build a standalone Kemi app for each OS with PyInstaller
+# and attach the artefacts to the GitHub Release — end users download and run
+# without installing Python.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: kemi-linux
+          - os: macos-latest
+            artifact: kemi-macos
+          - os: windows-latest
+            artifact: kemi-windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip pyinstaller pynacl
+          pip install -e .
+      - name: Build standalone app
+        run: pyinstaller --clean --noconfirm packaging/kemi.spec
+      - name: Package artefact
+        shell: bash
+        run: |
+          cd dist
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../${{ matrix.artifact }}.zip" Kemi.exe
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            zip -r "../${{ matrix.artifact }}.zip" Kemi.app
+          else
+            zip -r "../${{ matrix.artifact }}.zip" Kemi
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact }}.zip

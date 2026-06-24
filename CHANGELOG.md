@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0 — RAG, bilingual dashboard, downloadable apps
+- RAG on the fleet: a `vector.search` task (cosine top-k retrieval) plus
+  `Fleet.rag_search()` and `kemi search` — embed query + documents and rank
+  them, all on the swarm. Pairs with `ai.embed` to make Kemi a real
+  retrieval-augmented-generation backend.
+- Bilingual dashboard (T12): a TR/EN toggle translating the panel's headings,
+  welcome, buttons and labels, remembered in localStorage.
+- Downloadable desktop apps: a GitHub Actions workflow builds a standalone
+  Kemi for Linux/macOS/Windows with PyInstaller on each tagged release and
+  attaches them to the GitHub Release — users download and run, no Python.
+
 ## 1.1.0 — Runs everywhere (iOS, Android, macOS, Windows, Linux)
 - Progressive Web App: the dashboard is now installable on iOS (Add to Home
   Screen), Android (Install app) and every desktop browser — manifest,

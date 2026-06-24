@@ -61,6 +61,24 @@ class PackagingArtefactTests(unittest.TestCase):
         for os_name in ("iOS", "Android", "macOS", "Windows", "Linux"):
             self.assertIn(os_name, text)
 
+    def test_apps_workflow_builds_three_oses(self):
+        text = (ROOT / ".github" / "workflows" / "apps.yml").read_text()
+        for os_runner in ("ubuntu-latest", "macos-latest", "windows-latest"):
+            self.assertIn(os_runner, text)
+        self.assertIn("pyinstaller", text)
+        self.assertIn("action-gh-release", text)
+
+
+class DashboardI18nTests(unittest.TestCase):
+    def test_both_languages_present(self):
+        from kemi.webui import _PAGE
+
+        self.assertIn("I18N", _PAGE)
+        self.assertIn("filo paneli", _PAGE)   # Turkish
+        self.assertIn("fleet panel", _PAGE)    # English
+        self.assertIn('data-i18n="providers"', _PAGE)
+        self.assertIn("langbtn", _PAGE)
+
 
 if __name__ == "__main__":
     unittest.main()

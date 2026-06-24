@@ -504,24 +504,27 @@ _PAGE = """<!doctype html>
   footer { padding:8px 22px 20px; color:var(--dim); font-size:12px; }
 </style></head><body>
 <header>
-  <h1>kemi <span class="dim">fleet panel</span></h1>
+  <h1>kemi <span class="dim" data-i18n="panel">fleet panel</span></h1>
   <span id="nodeinfo" class="dim"></span>
-  <button id="invitebtn" type="button" title="Copy an invite code to share with a friend"
+  <button id="invitebtn" type="button" data-i18n="invite"
           style="width:auto;padding:7px 14px;margin-left:8px">⚓ Invite a friend</button>
-  <span class="balance"><span id="balance">…</span> <span class="dim">credits</span></span>
+  <button id="langbtn" type="button" title="Türkçe / English"
+          style="width:auto;padding:7px 12px">TR</button>
+  <span class="balance"><span id="balance">…</span>
+        <span class="dim" data-i18n="credits">credits</span></span>
 </header>
 <p id="welcome" style="margin:0;padding:6px 22px;color:var(--dim);border-bottom:1px solid var(--line)">
-  Welcome aboard! Ask the AI below, or share an invite so friends pool their computers with yours.
+  <span data-i18n="welcome">Welcome aboard! Ask the AI below, or share an invite so friends pool their computers with yours.</span>
 </p>
 <main>
   <section>
-    <h2>Providers (live)</h2>
+    <h2 data-i18n="providers">Providers (live)</h2>
     <table><thead><tr>
       <th>ship</th><th>price</th><th>rep</th><th>cpu/gpu</th><th>path</th><th>tasks</th>
     </tr></thead><tbody id="providers"></tbody></table>
   </section>
   <section>
-    <h2>Submit a job</h2>
+    <h2 data-i18n="submit">Submit a job</h2>
     <div id="templates" style="margin-bottom:10px">
       <span class="dim" style="font-size:12px">templates:</span>
       <button type="button" class="tpl" data-tpl="hash">hash text</button>
@@ -540,7 +543,7 @@ _PAGE = """<!doctype html>
         <textarea id="items">["hello", "world"]</textarea></div>
       <div><label>params (JSON object)</label>
         <input id="params" value="{}"></div>
-      <button type="submit">send to the fleet</button>
+      <button type="submit" data-i18n="send">send to the fleet</button>
       <div id="jobmsg"></div>
     </form>
     <table><thead><tr>
@@ -548,7 +551,7 @@ _PAGE = """<!doctype html>
     </tr></thead><tbody id="jobs"></tbody></table>
   </section>
   <section>
-    <h2>Chat with the fleet</h2>
+    <h2 data-i18n="chat">Chat with the fleet</h2>
     <div id="chatlog" style="max-height:260px;overflow-y:auto;margin-bottom:10px"></div>
     <form id="chatform" style="grid-template-columns:1fr auto;display:grid;gap:8px">
       <input id="chatmsg" placeholder="ask the fleet's AI anything…" autocomplete="off">
@@ -556,7 +559,7 @@ _PAGE = """<!doctype html>
     </form>
   </section>
   <section>
-    <h2>Ledger (latest transfers)</h2>
+    <h2 data-i18n="ledger">Ledger (latest transfers)</h2>
     <svg id="spark" width="100%" height="48" viewBox="0 0 400 48"
          preserveAspectRatio="none" style="display:block;margin-bottom:10px">
       <polyline id="sparkline" fill="none" stroke="#3fb950" stroke-width="1.5"/>
@@ -567,7 +570,7 @@ _PAGE = """<!doctype html>
     <div id="flagged"></div>
   </section>
   <section>
-    <h2>Reputation (as this node sees it)</h2>
+    <h2 data-i18n="reputation">Reputation (as this node sees it)</h2>
     <table><thead><tr>
       <th>ship</th><th>score</th><th>good</th><th>bad</th><th>events</th>
     </tr></thead><tbody id="reputation"></tbody></table>
@@ -733,6 +736,34 @@ $('#invitebtn').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(cmd); } catch (e) {}
   window.prompt('Send this to a friend — they paste it and run it to join your fleet:', cmd);
 });
+
+const I18N = {
+  en: {panel:'fleet panel', invite:'⚓ Invite a friend', credits:'credits',
+       welcome:'Welcome aboard! Ask the AI below, or share an invite so friends pool their computers with yours.',
+       providers:'Providers (live)', submit:'Submit a job',
+       chat:'Chat with the fleet', ledger:'Ledger (latest transfers)',
+       reputation:'Reputation (as this node sees it)', send:'send to the fleet'},
+  tr: {panel:'filo paneli', invite:'⚓ Arkadaş davet et', credits:'kredi',
+       welcome:'Hoş geldin! Aşağıdan yapay zekâya sor ya da bir davet paylaş; arkadaşların bilgisayarlarını seninkiyle birleştirsin.',
+       providers:'Sağlayıcılar (canlı)', submit:'İş gönder',
+       chat:'Filoyla sohbet et', ledger:'Defter (son transferler)',
+       reputation:'İtibar (bu düğümün gözünden)', send:'filoya gönder'},
+};
+function applyLang(lang) {
+  const dict = I18N[lang] || I18N.en;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const v = dict[el.dataset.i18n];
+    if (v) el.textContent = v;
+  });
+  document.documentElement.lang = lang;
+  $('#langbtn').textContent = lang === 'tr' ? 'EN' : 'TR';
+  try { localStorage.setItem('kemi-lang', lang); } catch (e) {}
+}
+$('#langbtn').addEventListener('click', () => {
+  const cur = (localStorage.getItem('kemi-lang') || 'en');
+  applyLang(cur === 'tr' ? 'en' : 'tr');
+});
+try { applyLang(localStorage.getItem('kemi-lang') || 'en'); } catch (e) {}
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});

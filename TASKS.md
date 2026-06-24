@@ -38,7 +38,7 @@ Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 |----|--------|------|--------|--------|
 | T10 | ⬜ | **Fleet map** — live network topology visualisation in the dashboard (ships, relay links, traffic) | Medium | Medium |
 | T11 | ✅ | **Job templates** — one-click presets (hash/wordcount/AI/embed/aggregate) in the dashboard *(v0.15)* | Medium | Low |
-| T12 | ⬜ | **Bilingual dashboard** — TR/EN language toggle in the panel | Low | Low |
+| T12 | ✅ | **Bilingual dashboard** — TR/EN toggle for panel headings, welcome, buttons *(v1.2)* | Low | Low |
 
 ## E — Operations
 
