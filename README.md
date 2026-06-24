@@ -219,6 +219,23 @@ kemi node --peer FIRST_PEER_IP:7700 --ui 8080   # http://127.0.0.1:8080/
 All job traffic is **end-to-end encrypted by default** (provider records
 advertise the `e2e` capability; opt out with `Job(encrypt=False)`).
 
+### Drop-in OpenAI API — use the fleet from any AI tool
+
+`kemi serve` exposes a localhost endpoint that speaks the **OpenAI REST API**,
+backed by the fleet. Point any OpenAI-compatible client (Cursor, Continue,
+LangChain, the `openai` SDK, OpenWebUI…) at it and it runs on Kemi — no API
+key, no account, no rewrite:
+
+```bash
+kemi serve --peer FIRST_PEER_IP:7700        # serves http://127.0.0.1:11434/v1
+export OPENAI_BASE_URL=http://127.0.0.1:11434/v1
+export OPENAI_API_KEY=kemi                  # any non-empty string
+```
+
+Endpoints: `/v1/chat/completions` (incl. streaming), `/v1/embeddings`,
+`/v1/models`. The heavy inference runs on provider ships; the gateway just
+translates.
+
 ### Use it as a Python library
 
 Kemi is a library, not just a CLI - embedding the fleet in your own
@@ -374,6 +391,7 @@ the same way. New capabilities are added by registering tasks in
 | `kemi/tasks.py`, `kemi/ai_backends.py` | Allowlisted tasks; pluggable AI backends (mock/Ollama/transformers) |
 | `kemi/model.py`, `kemi/sharded.py` | Real shardable transformer + the big-model inference driver |
 | `kemi/webui.py` | Embedded live dashboard (stdlib HTTP) + Prometheus `/metrics` |
+| `kemi/openai_gateway.py` | OpenAI-compatible `/v1` API gateway (`kemi serve`) |
 | `kemi/ratelimit.py` | Per-IP token buckets and connection caps (DoS resistance) |
 | `kemi/economy.py` | Credit-economy model and `kemi economy` simulation |
 | `kemi/service.py` | systemd/launchd unit generation (`kemi service`) |

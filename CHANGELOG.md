@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0 — OpenAI-compatible gateway
+- `kemi serve`: a localhost endpoint speaking the OpenAI REST API
+  (`/v1/chat/completions` incl. streaming SSE, `/v1/embeddings`, `/v1/models`)
+  backed by the fleet. Point Cursor, Continue, LangChain, the `openai` SDK or
+  any OpenAI-compatible client at it — no API key, no account, no rewrite; the
+  whole existing AI-tooling ecosystem runs on Kemi.
+
 ## 1.3.0 — Fleet map, media transcoding, RAG CLI
 - Fleet map (T10): a live network-topology view in the dashboard — this ship
   at the centre, providers on a ring, relay links dashed, coloured by

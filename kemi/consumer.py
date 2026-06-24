@@ -214,6 +214,13 @@ class Consumer:
         seen = {p.get("model") for p in await self.list_providers(task)}
         return sorted(m for m in seen if m)
 
+    async def run_job_embeddings(self, texts: list[str],
+                                 model: str | None = None) -> list[list[float]]:
+        """Embed a batch of texts over the fleet (used by the OpenAI gateway)."""
+        report = await self.run_job(Job(task="ai.embed", items=list(texts),
+                                        chunk_size=8, model=model))
+        return report.results
+
     async def execute_on(self, record: dict[str, Any], task: str, items: list[Any],
                          params: dict[str, Any] | None = None, *,
                          encrypt: bool = True, timeout: float = 120.0) -> list[Any]:

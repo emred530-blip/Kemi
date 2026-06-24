@@ -247,6 +247,30 @@ async def _cmd_balance(args: argparse.Namespace) -> int:
         await node.stop()
 
 
+async def _cmd_serve(args: argparse.Namespace) -> int:
+    """Run the OpenAI-compatible gateway so any AI tool can use the fleet."""
+    from .openai_gateway import OpenAIGateway
+
+    node = _make_node(args, host="0.0.0.0", port=args.port, provide=False)
+    await node.start()
+    gw = OpenAIGateway(node, host=args.host, port=args.serve_port)
+    await gw.start()
+    print(f"⚓ OpenAI-compatible gateway: {gw.base_url}")
+    print("  Point any OpenAI client at it (no real key needed):")
+    print(f"    export OPENAI_BASE_URL={gw.base_url}")
+    print("    export OPENAI_API_KEY=kemi")
+    print("  Endpoints: /v1/chat/completions  /v1/embeddings  /v1/models")
+    print("  Ctrl+C to stop.")
+    try:
+        await node.serve_forever()
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await gw.stop()
+        await node.stop()
+    return 0
+
+
 async def _cmd_search(args: argparse.Namespace) -> int:
     """RAG over the fleet: rank documents (one per non-empty line) against a
     query by embedding both and cosine-ranking — all on the swarm."""
@@ -622,6 +646,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--task", default="ai.generate",
                    help="task to list models for (ai.generate or ai.embed)")
     p.set_defaults(func=_cmd_models)
+
+    p = sub.add_parser("serve", aliases=["gateway"],
+                       help="run an OpenAI-compatible API gateway backed by the fleet")
+    p.add_argument("--peer", type=_parse_endpoint, action="append", default=[],
+                   required=True, metavar="HOST:PORT")
+    p.add_argument("--host", default="127.0.0.1", help="gateway bind address")
+    p.add_argument("--serve-port", type=int, default=11434, help="gateway port")
+    p.add_argument("--port", type=int, default=0, help="this node's p2p port")
+    p.add_argument("--identity", default=DEFAULT_IDENTITY_PATH)
+    p.add_argument("--ledger", default=DEFAULT_LEDGER_PATH)
+    p.add_argument("--reputation", default=DEFAULT_REPUTATION_PATH)
+    p.set_defaults(func=_cmd_serve)
 
     p = sub.add_parser("search", aliases=["ara"],
                        help="RAG: rank documents against a query over the fleet")
