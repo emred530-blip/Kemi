@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.1 — Embeddings on sandboxed providers
+- Fix: `ai.embed` (and therefore `/v1/embeddings`, `fleet.embed()`,
+  `kemi search`) failed on default providers because the sandbox subprocess
+  has no AI backend — embed now runs in-process like `ai.generate`.
+  Found by end-to-end verification against a real node; regression-tested
+  with a sandboxed provider.
+- LAUNCH.md quickstart used the wrong `kemi run` syntax; corrected.
+
 ## 1.5.0 — Wallet and fairer reputation
 - `kemi wallet` / `cuzdan`: balance, rank and a recent transaction history
   (direction, counterparty ship, signed amount) for your ship.

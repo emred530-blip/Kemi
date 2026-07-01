@@ -53,9 +53,10 @@ class MarketplaceTests(unittest.IsolatedAsyncioTestCase):
             await node.stop()
 
     async def _spawn(self, **kwargs) -> PeerNode:
+        kwargs.setdefault("sandbox", False)
         node = PeerNode(Identity.create(difficulty=DIFF), host="127.0.0.1", port=0,
                         bootstrap=getattr(self, "peers", None) or [],
-                        difficulty=DIFF, sandbox=False, **kwargs)
+                        difficulty=DIFF, **kwargs)
         await node.start()
         self.nodes.append(node)
         return node
@@ -95,6 +96,20 @@ class MarketplaceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(vectors), 3)
             self.assertEqual(len(vectors[0]), 64)
             # consistent with a local mock embedding
+            self.assertEqual(vectors[0], _NamedMock("nomic").embed("alpha"))
+
+    async def test_embed_works_on_a_sandboxed_provider(self):
+        # Regression: ai.embed needs the in-process backend object, so it
+        # must be exempt from the sandbox subprocess — a default
+        # (sandbox=True) provider used to fail every embed chunk with
+        # "this provider has no AI backend configured".
+        from kemi.sandbox import UNSANDBOXED_TASKS
+        self.assertIn("ai.embed", UNSANDBOXED_TASKS)
+        await self._spawn(provide=True, price=1.0,
+                          ai_backend=_NamedMock("nomic"), sandbox=True)
+        async with kemi.connect(peer=f"127.0.0.1:{self.bootstrap.port}",
+                                difficulty=DIFF, sandbox=False) as fleet:
+            vectors = await fleet.embed(["alpha"])
             self.assertEqual(vectors[0], _NamedMock("nomic").embed("alpha"))
 
 

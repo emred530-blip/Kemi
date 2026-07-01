@@ -20,7 +20,7 @@ import sys
 from typing import Any
 
 # Backend-bound tasks that must run in the provider process.
-UNSANDBOXED_TASKS = frozenset({"ai.generate"})
+UNSANDBOXED_TASKS = frozenset({"ai.generate", "ai.embed"})
 
 DEFAULT_MEM_MB = 512
 

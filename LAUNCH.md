@@ -20,7 +20,7 @@ kemi app
 İkinci bir terminalde ilk işinizi koşun:
 
 ```sh
-kemi run hash.sha256 --lines --peer 127.0.0.1:7700 <<'EOF'
+kemi run --task hash.sha256 --input - --lines --peer 127.0.0.1:7700 <<'EOF'
 merhaba
 dunya
 EOF
