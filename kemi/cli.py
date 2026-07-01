@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,7 @@ import socket
 
 from . import __version__
 from .consumer import Consumer, Job, PipelineStage
-from .identity import DEFAULT_IDENTITY_PATH, Identity
+from .identity import Identity
 from .invite import InviteError, make_invite, parse_invite
 from .names import BANNER, rank_for, ship_name
 from .node import PeerNode
@@ -45,8 +46,13 @@ def _guess_lan_ip() -> str:
     finally:
         sock.close()
 
-DEFAULT_LEDGER_PATH = "~/.kemi/ledger.db"
-DEFAULT_REPUTATION_PATH = "~/.kemi/reputation.db"
+# All node state lives under $KEMI_HOME (default ~/.kemi) so one directory
+# holds the identity, ledger and reputation — handy for Docker volumes and
+# the service installer.
+KEMI_HOME = os.environ.get("KEMI_HOME") or os.path.join(os.path.expanduser("~"), ".kemi")
+DEFAULT_IDENTITY_PATH = os.path.join(KEMI_HOME, "identity.json")
+DEFAULT_LEDGER_PATH = os.path.join(KEMI_HOME, "ledger.db")
+DEFAULT_REPUTATION_PATH = os.path.join(KEMI_HOME, "reputation.db")
 
 
 def _parse_endpoint(value: str) -> tuple[str, int]:
