@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.7.0 — The captain's voice bridge
+- Speak to your ship: the dashboard's new "Captain's bridge" card takes
+  spoken orders (Web Speech API, Turkish) or typed commands and answers out
+  loud — status reports, provider listings, submitting jobs, asking the
+  fleet's AI, language toggle, invites, brain reports.
+- Understanding is a synapse net, not keyword rules (`kemi/voice.py`): 
+  utterances are stem-hashed into features and classified by the same
+  online-learning network that powers provider selection, pre-seeded with
+  Turkish and English phrasings. Unknown orders are refused honestly, and
+  one click teaches the bridge what you meant — it adapts to how *you*
+  speak, persisting to `$KEMI_HOME/voice.json`.
+- Cross-entropy output gradients in `SynapseNet`: confidently-wrong
+  predictions now get strong corrections instead of stalling at saturated
+  sigmoids (benefits the fleet brain too).
+
 ## 1.6.0 — The synapse brain (self-training)
 - `kemi/synapse.py`: a pure-stdlib online neural network that trains itself
   from the ship's own experience — every chunk a provider serves (or botches)

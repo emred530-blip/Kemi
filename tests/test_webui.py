@@ -176,5 +176,56 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 404)
 
 
+
+
+class VoiceBridgeTests(unittest.IsolatedAsyncioTestCase):
+    """The captain's voice bridge over the dashboard HTTP surface."""
+
+    async def asyncSetUp(self):
+        self.node = PeerNode(Identity.create(difficulty=DIFF), host="127.0.0.1",
+                             port=0, bootstrap=[], difficulty=DIFF, sandbox=False)
+        await self.node.start()
+        self.ui = WebUI(self.node, host="127.0.0.1", port=0)
+        await self.ui.start()
+        self.base = f"http://127.0.0.1:{self.ui.port}"
+
+    async def asyncTearDown(self):
+        await self.ui.stop()
+        await self.node.stop()
+
+    async def test_voice_command_endpoint(self):
+        status, _, body = await asyncio.to_thread(
+            _http, "POST", self.base + "/api/voice",
+            json.dumps({"text": "bakiye ne kadar"}).encode())
+        self.assertEqual(status, 200)
+        got = json.loads(body)
+        self.assertEqual(got["intent"], "durum")
+        self.assertIn("kredi", got["say"])
+        self.assertIn("durum", got["intents"])
+
+    async def test_voice_unknown_command_is_honest(self):
+        status, _, body = await asyncio.to_thread(
+            _http, "POST", self.base + "/api/voice",
+            json.dumps({"text": "fnord blorp zumzum"}).encode())
+        got = json.loads(body)
+        self.assertIsNone(got["intent"])
+        self.assertFalse(got["ok"])
+
+    async def test_voice_learn_endpoint_teaches_the_bridge(self):
+        for _ in range(2):
+            await asyncio.to_thread(
+                _http, "POST", self.base + "/api/voice/learn",
+                json.dumps({"text": "tam yol rapor", "intent": "durum"}).encode())
+        status, _, body = await asyncio.to_thread(
+            _http, "POST", self.base + "/api/voice",
+            json.dumps({"text": "tam yol rapor"}).encode())
+        self.assertEqual(json.loads(body)["intent"], "durum")
+
+    async def test_page_carries_the_bridge_card(self):
+        _, _, page = await asyncio.to_thread(_http, "GET", self.base + "/")
+        self.assertIn(b"micbtn", page)
+        self.assertIn(b"voiceform", page)
+
+
 if __name__ == "__main__":
     unittest.main()

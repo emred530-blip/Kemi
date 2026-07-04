@@ -89,8 +89,10 @@ class SynapseNet:
             raise ValueError(f"expected {len(out)} targets, got {len(y)}")
         loss = sum((t - o) ** 2 for t, o in zip(y, out)) / len(out)
 
-        # delta for the output layer (sigmoid derivative: o * (1 - o))
-        delta = [(o - t) * o * (1.0 - o) for o, t in zip(out, y)]
+        # Cross-entropy gradient at the output: delta is simply (o - t), so
+        # a confidently-wrong neuron still gets a strong correction (squared
+        # error would vanish at saturated sigmoids and learning would stall).
+        delta = [o - t for o, t in zip(out, y)]
         for li in range(len(self.weights) - 1, -1, -1):
             prev = acts[li]
             if li > 0:  # propagate before the weights move

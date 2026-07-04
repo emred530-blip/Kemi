@@ -20,6 +20,7 @@ import asyncio
 import functools
 import json
 import logging
+import os
 import secrets
 import time
 from collections import deque
@@ -30,6 +31,7 @@ from .consumer import Consumer, Job, JobError
 from .names import rank_for, ship_name
 from .node import PeerNode
 from .tasks import TASKS
+from .voice import INTENTS, VoiceBrain
 
 log = logging.getLogger("kemi.webui")
 
@@ -84,6 +86,10 @@ class WebUI:
         self._chat: dict[str, Any] = {"log": [], "live": "", "busy": False}
         self._chat_history: list[tuple[str, str]] = []
         self._loops: list[asyncio.Task] = []
+        brain_path = getattr(getattr(node, "brain", None), "path", None)
+        self._voice = VoiceBrain(
+            path=os.path.join(os.path.dirname(brain_path), "voice.json")
+            if brain_path else None)
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -309,6 +315,75 @@ class WebUI:
                 partials[idx] for idx in sorted(partials))[-400:]
         raise JobError("stream ended without a final summary")
 
+    # -- the captain's voice bridge -------------------------------------------
+
+    def _voice_command(self, text: str) -> dict[str, Any]:
+        """Understand a spoken order via the voice synapse net and act on it."""
+        text = text.strip()
+        if not text or len(text) > 500:
+            raise ValueError("command must be 1-500 characters")
+        got = self._voice.classify(text)
+        intent, node = got["intent"], self.node
+        say, done = "", True
+        if intent == "durum":
+            bal = node.ledger.balance(node.identity.node_id)
+            earned = node.ledger.total_earned(node.identity.node_id)
+            say = (f"Bakiye {bal:.2f} kredi, toplam kazanç {earned:.2f}. "
+                   f"Filoda {len(self._merged_providers())} sağlayıcı görünüyor.")
+        elif intent == "saglayicilar":
+            rows = self._merged_providers()
+            if rows:
+                top = ", ".join(f"{ship_name(p['node_id'])} ({p['price']:.2f} kredi)"
+                                for p in rows[:4])
+                say = f"{len(rows)} gemi hazır: {top}."
+            else:
+                say = "Şu an keşfedilmiş sağlayıcı yok kaptan."
+        elif intent == "is_hash":
+            try:
+                entry = self._submit_job({"task": "hash.sha256",
+                                          "items": ["kemi", "filo", "ruzgar"],
+                                          "chunk_size": 4, "redundancy": 1})
+                say = f"Emredersiniz. Hash işi {entry['id']} filoya gönderildi."
+            except (ValueError, JobError) as exc:
+                say, done = f"İş gönderilemedi: {exc}", False
+        elif intent == "sor":
+            question = got["payload"] or text
+            try:
+                self._submit_chat(question)
+                say = "Filoya soruldu, yanıt sohbet panelinde akacak."
+            except ValueError as exc:
+                say, done = str(exc), False
+        elif intent == "dil":
+            say = "Dil değiştiriliyor."
+        elif intent == "davet":
+            say = "Davet komutu panoya kopyalandı, paylaşabilirsiniz."
+        elif intent == "beyin":
+            b = node.brain.snapshot_ui() if getattr(node, "brain", None) else None
+            if b:
+                say = (f"Sinaps ağı {b['steps']} adım eğitildi"
+                       + (f", isabet yüzde {round(b['accuracy'] * 100)}"
+                          if b.get("accuracy") is not None else "")
+                       + (". Sağlayıcı seçiminde aktif."
+                          if b["trained"] else ". Hâlâ ısınıyor."))
+            else:
+                say = "Bu düğümde beyin yok."
+        elif intent == "yardim":
+            say = ("Şunları söyleyebilirsiniz: durum raporu, sağlayıcıları "
+                   "göster, hash işi gönder, filoya sor, dili değiştir, "
+                   "davet kodu, beyin durumu.")
+        else:
+            done = False
+            say = "Anlayamadım kaptan. Aşağıdan doğru komutu seçerseniz öğrenirim."
+        return {"ok": done, "intent": intent, "confidence": got["confidence"],
+                "say": say, "intents": INTENTS}
+
+    def _merged_providers(self) -> list[dict[str, Any]]:
+        merged: dict[str, dict[str, Any]] = {}
+        for providers in self._providers_cache.values():
+            for p in providers:
+                merged.setdefault(p["node_id"], p)
+        return sorted(merged.values(), key=lambda p: p["price"])
+
     def _submit_chat(self, message: str) -> None:
         if self._chat["busy"]:
             raise ValueError("a reply is already streaming; wait for it")
@@ -417,6 +492,21 @@ class WebUI:
                 spec = json.loads(body.decode("utf-8"))
                 entry = self._submit_job(spec)
                 await self._respond(writer, 200, {"ok": True, "job": entry["id"]})
+            except (ValueError, json.JSONDecodeError, TypeError) as exc:
+                await self._respond(writer, 400, {"ok": False, "error": str(exc)})
+        elif method == "POST" and path == "/api/voice":
+            try:
+                spec = json.loads(body.decode("utf-8"))
+                await self._respond(writer, 200,
+                                    self._voice_command(str(spec.get("text", ""))))
+            except (ValueError, json.JSONDecodeError, TypeError) as exc:
+                await self._respond(writer, 400, {"ok": False, "error": str(exc)})
+        elif method == "POST" and path == "/api/voice/learn":
+            try:
+                spec = json.loads(body.decode("utf-8"))
+                self._voice.learn(str(spec.get("text", "")),
+                                  str(spec.get("intent", "")))
+                await self._respond(writer, 200, {"ok": True})
             except (ValueError, json.JSONDecodeError, TypeError) as exc:
                 await self._respond(writer, 400, {"ok": False, "error": str(exc)})
         else:
@@ -561,6 +651,25 @@ _PAGE = """<!doctype html>
     </form>
   </section>
   <section>
+    <h2 data-i18n="voice">Captain's bridge (voice)</h2>
+    <div style="display:flex;gap:10px;align-items:center">
+      <button id="micbtn" type="button" title="konuş / speak"
+              style="width:auto;padding:9px 16px;font-size:18px">🎙</button>
+      <span id="voicestatus" class="dim" style="font-size:12px"></span>
+    </div>
+    <div id="voicelog" style="max-height:170px;overflow-y:auto;margin:10px 0"></div>
+    <form id="voiceform" style="grid-template-columns:1fr auto;display:grid;gap:8px">
+      <input id="voicetext" autocomplete="off"
+             placeholder="…ya da yazın: durum raporu / hash işi gönder">
+      <button type="submit" style="width:auto;padding:7px 14px"
+              data-i18n="voicesend">send</button>
+    </form>
+    <div id="voicefix" style="display:none;margin-top:8px">
+      <span class="dim" style="font-size:12px" data-i18n="voicefixlabel">I meant:</span>
+      <div id="voiceintents" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px"></div>
+    </div>
+  </section>
+  <section>
     <h2 data-i18n="ledger">Ledger (latest transfers)</h2>
     <svg id="spark" width="100%" height="48" viewBox="0 0 400 48"
          preserveAspectRatio="none" style="display:block;margin-bottom:10px">
@@ -662,6 +771,12 @@ function render(s) {
   if (chat.busy || chat.log.length !== window._chatLen) {
     window._chatLen = chat.log.length;
     $('#chatlog').scrollTop = $('#chatlog').scrollHeight;
+  }
+  // In voice mode, read new fleet replies aloud (never the backlog).
+  if (window._chatSpoken === undefined) window._chatSpoken = chat.log.length;
+  while (window._chatSpoken < chat.log.length) {
+    const m = chat.log[window._chatSpoken++];
+    if (window._voiceOn && m.role === 'fleet') speak(m.text.slice(0, 220));
   }
 
   if (s.history.length > 1) {
@@ -784,6 +899,92 @@ $('#jobform').addEventListener('submit', async (ev) => {
   } catch (e) { msg.className = 'bad'; msg.textContent = 'error: ' + e.message; }
 });
 
+// ---- the captain's voice bridge ----
+const VOICE_LABELS = {durum:'durum raporu', saglayicilar:'sağlayıcılar',
+  is_hash:'hash işi', sor:'filoya sor', dil:'dil değiştir',
+  davet:'davet kodu', beyin:'beyin durumu', yardim:'yardım'};
+let _lastUtterance = '';
+window._voiceOn = false;
+function speak(text) {
+  try {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'tr-TR';  // the bridge answers in Turkish
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+function vlog(who, text, cls) {
+  const d = document.createElement('div');
+  d.innerHTML = `<span class="${cls || 'lnk'}">${esc(who)}</span> ${esc(text)}`;
+  $('#voicelog').appendChild(d);
+  $('#voicelog').scrollTop = $('#voicelog').scrollHeight;
+}
+async function voiceCommand(text) {
+  _lastUtterance = text;
+  vlog('siz 🎙', text, 'ok');
+  $('#voicefix').style.display = 'none';
+  try {
+    const r = await (await fetch('/api/voice',
+      {method: 'POST', body: JSON.stringify({text})})).json();
+    const tag = r.intent
+      ? ` [${VOICE_LABELS[r.intent] || r.intent} · %${Math.round(r.confidence * 100)}]` : '';
+    vlog('köprü ⚓', r.say + tag, r.ok ? 'lnk' : 'bad');
+    speak(r.say);
+    $('#voiceintents').innerHTML = (r.intents || []).map(i =>
+      `<button type="button" class="tpl" data-vi="${i}">${VOICE_LABELS[i] || i}</button>`
+    ).join('');
+    document.querySelectorAll('#voiceintents button').forEach(b =>
+      b.addEventListener('click', async () => {
+        await fetch('/api/voice/learn', {method: 'POST',
+          body: JSON.stringify({text: _lastUtterance, intent: b.dataset.vi})});
+        vlog('köprü ⚓',
+             `öğrendim: "${_lastUtterance}" → ${VOICE_LABELS[b.dataset.vi]}`, 'ok');
+        $('#voicefix').style.display = 'none';
+      }));
+    $('#voicefix').style.display = '';
+    if (r.intent === 'dil') $('#langbtn').click();
+    if (r.intent === 'davet') $('#invitebtn').click();
+    refresh();
+  } catch (e) { vlog('köprü ⚓', 'düğüme ulaşılamadı', 'bad'); }
+}
+$('#voiceform').addEventListener('submit', ev => {
+  ev.preventDefault();
+  const t = $('#voicetext').value.trim();
+  if (t) { $('#voicetext').value = ''; voiceCommand(t); }
+});
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (SR) {
+  const recog = new SR();
+  recog.lang = 'tr-TR';
+  recog.interimResults = false;
+  recog.maxAlternatives = 1;
+  recog.onresult = ev => voiceCommand(ev.results[ev.results.length - 1][0].transcript);
+  recog.onend = () => { if (window._voiceOn) { try { recog.start(); } catch (e) {} } };
+  recog.onerror = ev => {
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+      window._voiceOn = false;
+      $('#micbtn').style.background = '';
+      $('#voicestatus').textContent = 'mikrofon izni gerekli';
+    }
+  };
+  $('#micbtn').addEventListener('click', () => {
+    window._voiceOn = !window._voiceOn;
+    if (window._voiceOn) {
+      try { recog.start(); } catch (e) {}
+      $('#micbtn').style.background = '#f85149';
+      $('#voicestatus').textContent = 'dinliyorum… "durum raporu" deyin';
+    } else {
+      recog.stop();
+      $('#micbtn').style.background = '';
+      $('#voicestatus').textContent = 'mikrofon kapalı';
+    }
+  });
+  $('#voicestatus').textContent = 'mikrofona tıklayıp konuşun — ya da yazın';
+} else {
+  $('#micbtn').disabled = true;
+  $('#voicestatus').textContent =
+    'bu tarayıcıda ses tanıma yok (Chrome deneyin) — yazarak komut verin';
+}
+
 $('#chatform').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const box = $('#chatmsg');
@@ -828,13 +1029,15 @@ const I18N = {
        providers:'Providers (live)', submit:'Submit a job',
        chat:'Chat with the fleet', ledger:'Ledger (latest transfers)',
        reputation:'Reputation (as this node sees it)', send:'send to the fleet', map:'Fleet map',
-       brain:'Synapse brain (self-training)'},
+       brain:'Synapse brain (self-training)', voice:"Captain's bridge (voice)",
+       voicesend:'send', voicefixlabel:'I meant:'},
   tr: {panel:'filo paneli', invite:'⚓ Arkadaş davet et', credits:'kredi',
        welcome:'Hoş geldin! Aşağıdan yapay zekâya sor ya da bir davet paylaş; arkadaşların bilgisayarlarını seninkiyle birleştirsin.',
        providers:'Sağlayıcılar (canlı)', submit:'İş gönder',
        chat:'Filoyla sohbet et', ledger:'Defter (son transferler)',
        reputation:'İtibar (bu düğümün gözünden)', send:'filoya gönder', map:'Filo haritası',
-       brain:'Sinaps ağı (kendi kendini eğitir)'},
+       brain:'Sinaps ağı (kendi kendini eğitir)', voice:'Kaptan köşkü (sesli komut)',
+       voicesend:'gönder', voicefixlabel:'bunu kastetmiştim:'},
 };
 function applyLang(lang) {
   const dict = I18N[lang] || I18N.en;
