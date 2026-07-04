@@ -205,9 +205,22 @@ class Consumer:
             if model is not None and p.get("model") != model:
                 continue  # multi-model marketplace: consumer pins a model
             usable.append(p)
-        # Best reputation first, then cheapest.
-        usable.sort(key=lambda p: (-self.node.reputation.score(p["node_id"]), p["price"]))
+        # Best reputation first, then cheapest. Once the ship's brain has
+        # seen enough real outcomes, its prediction seasons the ranking.
+        rep = self.node.reputation
+        brain = getattr(self.node, "brain", None)
+        if brain is not None and brain.trained:
+            usable.sort(key=lambda p: (-brain.rank_score(p, rep.score(p["node_id"])),
+                                       p["price"]))
+        else:
+            usable.sort(key=lambda p: (-rep.score(p["node_id"]), p["price"]))
         return usable
+
+    def _learn(self, record: dict[str, Any], ok: bool) -> None:
+        """Feed a real hiring outcome to the ship's self-training brain."""
+        brain = getattr(self.node, "brain", None)
+        if brain is not None:
+            brain.learn(record, self.node.reputation.score(record["node_id"]), ok)
 
     async def models(self, task: str = "ai.generate") -> list[str]:
         """Distinct AI model names currently advertised for a task."""
@@ -251,9 +264,11 @@ class Consumer:
             response = await send_to_provider(record, message, timeout=timeout)
         except NETWORK_ERRORS as exc:
             self.node.reputation.record(provider_id, "chunk_fail")
+            self._learn(record, False)
             raise JobError(f"provider unreachable: {exc}")
         if not response.get("ok"):
             self.node.reputation.record(provider_id, "chunk_fail")
+            self._learn(record, False)
             raise JobError(f"{response.get('error')}: {response.get('detail', '')}")
         if box_key is not None:
             try:
@@ -264,10 +279,12 @@ class Consumer:
             results = response.get("results")
         if not isinstance(results, list) or len(results) != len(items):
             self.node.reputation.record(provider_id, "chunk_fail")
+            self._learn(record, False)
             raise JobError("provider returned a malformed result")
         ledger.add_tx(tx)
         self.node.gossip_tx(tx)
         self.node.reputation.record(provider_id, "chunk_ok")
+        self._learn(record, True)
         return results
 
     async def run_job(self, job: Job) -> JobReport:
@@ -350,6 +367,7 @@ class Consumer:
                     scheduler.fail(chunk, provider_id)
                     strikes += 1
                     self.node.reputation.record(provider_id, "chunk_fail")
+                    self._learn(record, False)
                     log.warning("provider %s unreachable for chunk %d: %s",
                                 provider_id[:12], chunk.index, exc)
                     continue
@@ -358,6 +376,7 @@ class Consumer:
                     strikes += 1
                     exposure += amount
                     self.node.reputation.record(provider_id, "chunk_fail")
+                    self._learn(record, False)
                     log.warning("provider %s failed chunk %d: %s: %s",
                                 provider_id[:12], chunk.index,
                                 response.get("error"), response.get("detail", ""))
@@ -375,6 +394,7 @@ class Consumer:
                     strikes += 1
                     exposure += amount
                     self.node.reputation.record(provider_id, "chunk_fail")
+                    self._learn(record, False)
                     continue
                 strikes = 0
                 if box_key is not None:
@@ -390,6 +410,7 @@ class Consumer:
                     self.node.reputation.record(loser, "mismatch")
                 if provider_id not in losers:
                     self.node.reputation.record(provider_id, "chunk_ok")
+                self._learn(record, provider_id not in losers)
 
         def spent_pending() -> float:
             # make_tx applies nothing locally until success; reserve a margin
@@ -503,6 +524,7 @@ class Consumer:
                             ledger.add_tx(tx)
                             self.node.gossip_tx(tx)
                             self.node.reputation.record(record["node_id"], "chunk_ok")
+                            self._learn(record, True)
                             yield {"done": True, "results": event.get("results"),
                                    "spent": amount, "provider": record["node_id"]}
                             return

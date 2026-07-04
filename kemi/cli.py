@@ -53,6 +53,7 @@ KEMI_HOME = os.environ.get("KEMI_HOME") or os.path.join(os.path.expanduser("~"),
 DEFAULT_IDENTITY_PATH = os.path.join(KEMI_HOME, "identity.json")
 DEFAULT_LEDGER_PATH = os.path.join(KEMI_HOME, "ledger.db")
 DEFAULT_REPUTATION_PATH = os.path.join(KEMI_HOME, "reputation.db")
+DEFAULT_BRAIN_PATH = os.path.join(KEMI_HOME, "brain.json")
 
 
 def _parse_endpoint(value: str) -> tuple[str, int]:
@@ -89,6 +90,7 @@ def _make_node(args: argparse.Namespace, **overrides: Any) -> PeerNode:
         bootstrap=args.peer,
         ledger_path=_expand_db(args.ledger),
         reputation_path=_expand_db(args.reputation),
+        brain_path=DEFAULT_BRAIN_PATH,
         **overrides,
     )
 

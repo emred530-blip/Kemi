@@ -229,6 +229,8 @@ class WebUI:
                         for ts, balance in self._history],
             "chat": {"log": self._chat["log"][-30:],
                      "live": self._chat["live"], "busy": self._chat["busy"]},
+            "brain": (node.brain.snapshot_ui()
+                      if getattr(node, "brain", None) is not None else None),
         }
 
     # -- job execution -----------------------------------------------------------
@@ -580,6 +582,16 @@ _PAGE = """<!doctype html>
     <svg id="fleetmap" width="100%" height="260" viewBox="0 0 400 260"
          preserveAspectRatio="xMidYMid meet"></svg>
   </section>
+  <section id="braincard" style="display:none">
+    <h2 data-i18n="brain">Synapse brain (self-training)</h2>
+    <svg id="brainviz" width="100%" height="210" viewBox="0 0 400 210"
+         preserveAspectRatio="xMidYMid meet"></svg>
+    <svg id="brainloss" width="100%" height="34" viewBox="0 0 400 34"
+         preserveAspectRatio="none" style="display:block;margin-top:6px">
+      <polyline id="brainlosspoly" fill="none" stroke="#f85149" stroke-width="1.2"/>
+    </svg>
+    <div id="brainstats" class="dim" style="font-size:12px;margin-top:4px"></div>
+  </section>
 </main>
 <footer id="footer"></footer>
 <script>
@@ -705,6 +717,47 @@ function render(s) {
     <td class="${r.score >= 0.5 ? 'ok' : 'bad'}">${r.score.toFixed(2)}</td>
     <td>${r.good}</td><td>${r.bad}</td><td>${r.events}</td>
   </tr>`).join('') || '<tr><td colspan="5" class="dim">no interactions yet</td></tr>';
+
+  if (s.brain) renderBrain(s.brain);
+}
+
+// The ship's self-training brain: neurons as circles, synapses as lines
+// (green = excitatory, red = inhibitory, thickness = |weight|).
+function renderBrain(b) {
+  $('#braincard').style.display = '';
+  const W = 400, H = 210, L = b.sizes.length;
+  const xs = b.sizes.map((_, i) => 46 + i * (W - 92) / (L - 1));
+  const pos = b.sizes.map((n, i) =>
+    Array.from({length: n}, (_, j) => ({x: xs[i], y: H / (n + 1) * (j + 1)})));
+  let svg = '';
+  b.weights.forEach((layer, li) => layer.forEach((row, k) => row.forEach((w, j) => {
+    const a = Math.min(1, Math.abs(w) / 2.5);
+    if (a < 0.03) return;
+    svg += `<line x1="${pos[li][j].x}" y1="${pos[li][j].y}" ` +
+           `x2="${pos[li + 1][k].x}" y2="${pos[li + 1][k].y}" ` +
+           `stroke="${w >= 0 ? '#3fb950' : '#f85149'}" ` +
+           `stroke-width="${(0.3 + 2.4 * a).toFixed(2)}" ` +
+           `opacity="${(0.12 + 0.8 * a).toFixed(2)}"/>`;
+  })));
+  pos.forEach((layer, i) => layer.forEach((p, j) => {
+    svg += `<circle cx="${p.x}" cy="${p.y}" r="6" fill="#1f6feb" stroke="#30363d"/>`;
+    if (i === 0) svg += `<text x="${p.x - 10}" y="${p.y + 3}" fill="#8b949e" ` +
+      `font-size="8" text-anchor="end">${esc(b.features[j] || '')}</text>`;
+  }));
+  const o = pos[L - 1][0];
+  svg += `<text x="${o.x + 10}" y="${o.y + 3}" fill="#8b949e" font-size="8">success?</text>`;
+  $('#brainviz').innerHTML = svg;
+  const ys = b.loss_history || [];
+  if (ys.length > 1) {
+    const top = Math.max(...ys, 0.01);
+    $('#brainlosspoly').setAttribute('points', ys.map((v, i) =>
+      `${(i / (ys.length - 1) * 396 + 2).toFixed(1)},${(32 - v / top * 28).toFixed(1)}`
+    ).join(' '));
+  }
+  $('#brainstats').textContent =
+    `${b.steps} training steps · loss ${b.loss ?? '—'} · ` +
+    `accuracy ${b.accuracy != null ? Math.round(b.accuracy * 100) + '%' : '—'} · ` +
+    (b.trained ? 'active in provider ranking' : 'warming up');
 }
 
 async function refresh() {
@@ -774,12 +827,14 @@ const I18N = {
        welcome:'Welcome aboard! Ask the AI below, or share an invite so friends pool their computers with yours.',
        providers:'Providers (live)', submit:'Submit a job',
        chat:'Chat with the fleet', ledger:'Ledger (latest transfers)',
-       reputation:'Reputation (as this node sees it)', send:'send to the fleet', map:'Fleet map'},
+       reputation:'Reputation (as this node sees it)', send:'send to the fleet', map:'Fleet map',
+       brain:'Synapse brain (self-training)'},
   tr: {panel:'filo paneli', invite:'⚓ Arkadaş davet et', credits:'kredi',
        welcome:'Hoş geldin! Aşağıdan yapay zekâya sor ya da bir davet paylaş; arkadaşların bilgisayarlarını seninkiyle birleştirsin.',
        providers:'Sağlayıcılar (canlı)', submit:'İş gönder',
        chat:'Filoyla sohbet et', ledger:'Defter (son transferler)',
-       reputation:'İtibar (bu düğümün gözünden)', send:'filoya gönder', map:'Filo haritası'},
+       reputation:'İtibar (bu düğümün gözünden)', send:'filoya gönder', map:'Filo haritası',
+       brain:'Sinaps ağı (kendi kendini eğitir)'},
 };
 function applyLang(lang) {
   const dict = I18N[lang] || I18N.en;

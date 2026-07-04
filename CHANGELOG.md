@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.0 — The synapse brain (self-training)
+- `kemi/synapse.py`: a pure-stdlib online neural network that trains itself
+  from the ship's own experience — every chunk a provider serves (or botches)
+  becomes a training example the moment it happens. No dataset, no labels,
+  no human in the loop.
+- The brain seasons provider ranking (70% reputation + 30% prediction) once
+  it has seen enough real outcomes; before that it learns silently in the
+  background. Persists to `$KEMI_HOME/brain.json` and survives restarts.
+- Dashboard "Synapse brain" card: live synapse visualisation (green
+  excitatory / red inhibitory, thickness = |weight|), loss curve, step and
+  accuracy counters — watch your ship learn in real time.
+
 ## 1.5.1 — Embeddings on sandboxed providers
 - Fix: `ai.embed` (and therefore `/v1/embeddings`, `fleet.embed()`,
   `kemi search`) failed on default providers because the sandbox subprocess

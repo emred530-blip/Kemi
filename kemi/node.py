@@ -44,6 +44,7 @@ from .protocol import (NETWORK_ERRORS, ProtocolError, error, ok, read_message,
 from .ratelimit import IPGuard, Limits
 from .reputation import ReputationStore
 from .sandbox import UNSANDBOXED_TASKS, SandboxError, run_sandboxed
+from .synapse import FleetBrain
 from .tasks import BACKEND_REQUIRED, TASKS, TaskError, run_task
 
 log = logging.getLogger("kemi.node")
@@ -202,6 +203,7 @@ class PeerNode:
         limits: Limits | None = None,
         prune_above: int | None = None,
         dynamic_price: bool = False,
+        brain_path: str | None = None,
     ):
         self.identity = identity
         self.host = host
@@ -218,6 +220,7 @@ class PeerNode:
         self._open_connections = 0
         self.ledger = GossipLedger(ledger_path, difficulty=difficulty)
         self.reputation = ReputationStore(reputation_path)
+        self.brain = FleetBrain(brain_path)
         self.dht = DHTNode(identity, host=host, port=port, difficulty=difficulty,
                            guard=self._udp_guard, max_keys=self.limits.dht_max_keys)
 
