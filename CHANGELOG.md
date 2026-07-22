@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.8.0 — The fleet answers people
+- When someone asks the fleet a question, a ship serving a *real* model
+  (Ollama, transformers) now always outranks a mock ship, however cheap the
+  mock is — people get real answers whenever one is on offer. Non-AI tasks
+  keep the reputation/price order.
+- No more hanging chats: a provider that accepts a stream but produces no
+  output is abandoned after a short first-token timeout and the next ship is
+  tried automatically; the stall is fed to reputation and the synapse brain.
+- The OpenAI gateway got an overall per-request deadline (504 Gateway
+  Timeout instead of a stuck client) and speaks errors in-band on SSE
+  streams instead of silently dropping the connection.
+- Every dashboard chat reply is now stamped with its provenance —
+  `[credits · ship · model]` — visible proof the answer came from another
+  user's machine, not a central server. Chat placeholder localised to
+  Turkish; `chat_once` returns the serving model.
+- `kemi doctor` now lists the models your local Ollama has pulled and prints
+  the exact command that turns your machine into an answering ship earning
+  credits: `kemi node --provide --ai-backend ollama --ai-model <model>`.
+
 ## 1.7.0 — The captain's voice bridge
 - Speak to your ship: the dashboard's new "Captain's bridge" card takes
   spoken orders (Web Speech API, Turkish) or typed commands and answers out

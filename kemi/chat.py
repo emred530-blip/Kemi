@@ -36,26 +36,29 @@ def build_prompt(history: list[tuple[str, str]], user_message: str) -> str:
 
 async def chat_once(consumer: Consumer, history: list[tuple[str, str]],
                     user_message: str, *, max_tokens: int = 128,
-                    on_token=None, model: str | None = None) -> tuple[str, float, str]:
-    """One conversational turn. Returns (reply, credits_spent, provider_id)
-    and appends the exchange to ``history``."""
+                    on_token=None, model: str | None = None
+                    ) -> tuple[str, float, str, str]:
+    """One conversational turn. Returns (reply, credits_spent, provider_id,
+    model_name) and appends the exchange to ``history``."""
     prompt = build_prompt(history, user_message)
     parts: list[str] = []
     spent = 0.0
     provider = ""
+    served_model = ""
     async for event in consumer.stream_generate([prompt],
                                                 {"max_tokens": max_tokens},
                                                 model=model):
         if event.get("done"):
             spent = float(event.get("spent", 0.0))
             provider = str(event.get("provider", ""))
+            served_model = str(event.get("model") or "")
             break
         parts.append(event["token"])
         if on_token is not None:
             on_token(event["token"])
     reply = "".join(parts).strip()
     history.append((user_message, reply))
-    return reply, spent, provider
+    return reply, spent, provider, served_model
 
 
 async def run_chat(consumer: Consumer, *, max_tokens: int = 128,
@@ -95,7 +98,7 @@ async def run_chat(consumer: Consumer, *, max_tokens: int = 128,
             continue
         print("fleet > ", end="", flush=True)
         try:
-            _, spent, provider = await chat_once(
+            _, spent, provider, _ = await chat_once(
                 consumer, history, user_message, max_tokens=max_tokens,
                 on_token=lambda tok: print(tok, end="", flush=True), model=model)
         except JobError as exc:

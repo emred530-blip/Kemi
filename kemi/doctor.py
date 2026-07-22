@@ -108,12 +108,30 @@ async def run_checks(peer: tuple[str, int] | None = None,
                          if gpus else "no NVIDIA GPU detected (CPU tasks only)"))
 
     # Ollama -------------------------------------------------------------------------
+    import json as _json
     import urllib.request
 
+    def _probe_ollama() -> list[str]:
+        with urllib.request.urlopen("http://127.0.0.1:11434/api/tags",
+                                    timeout=2) as response:
+            payload = _json.loads(response.read())
+        return [str(m.get("name", "")).split(":")[0]
+                for m in payload.get("models", []) if m.get("name")]
+
     try:
-        with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=2):
-            checks.append(_check("ollama", True,
-                                 "Ollama server running - real LLM inference available"))
+        models = await asyncio.to_thread(_probe_ollama)
+        if models:
+            first = models[0]
+            checks.append(_check(
+                "ollama", True,
+                f"Ollama running with {len(models)} model(s): {', '.join(models[:4])}",
+                "answer the fleet's questions for credits: "
+                f"kemi node --provide --ai-backend ollama --ai-model {first}"))
+        else:
+            checks.append(_check(
+                "ollama", True, "Ollama running but no models pulled yet",
+                "pull one (e.g. `ollama pull llama3.2`), then: "
+                "kemi node --provide --ai-backend ollama --ai-model llama3.2"))
     except Exception:
         checks.append(_check(
             "ollama", True, "Ollama not running (mock AI backend will be used)",

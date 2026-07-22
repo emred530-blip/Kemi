@@ -114,12 +114,13 @@ class ChatTests(unittest.IsolatedAsyncioTestCase):
             consumer = Consumer(me)
             history: list = []
             tokens: list[str] = []
-            reply, spent, provider = await chat_once(
+            reply, spent, provider, served_model = await chat_once(
                 consumer, history, "hello there", max_tokens=6,
                 on_token=tokens.append)
             self.assertEqual(reply, "".join(tokens).strip())
             self.assertEqual(spent, 1.0)
             self.assertEqual(len(provider), 64)
+            self.assertEqual(served_model, "mock")
             self.assertEqual(history, [("hello there", reply)])
             # second turn includes the first exchange in its prompt
             await chat_once(consumer, history, "and again", max_tokens=6)

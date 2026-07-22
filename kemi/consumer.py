@@ -205,15 +205,25 @@ class Consumer:
             if model is not None and p.get("model") != model:
                 continue  # multi-model marketplace: consumer pins a model
             usable.append(p)
-        # Best reputation first, then cheapest. Once the ship's brain has
+        # For AI tasks a ship serving a real model (ollama, transformers, …)
+        # always outranks a mock ship: someone asking the fleet a question
+        # deserves a real answer whenever one is on offer. Within each tier:
+        # best reputation first, then cheapest. Once the ship's brain has
         # seen enough real outcomes, its prediction seasons the ranking.
+        def mock_tier(p: dict[str, Any]) -> int:
+            if not task.startswith("ai."):
+                return 0
+            return 1 if (p.get("model") or "mock") == "mock" else 0
+
         rep = self.node.reputation
         brain = getattr(self.node, "brain", None)
         if brain is not None and brain.trained:
-            usable.sort(key=lambda p: (-brain.rank_score(p, rep.score(p["node_id"])),
+            usable.sort(key=lambda p: (mock_tier(p),
+                                       -brain.rank_score(p, rep.score(p["node_id"])),
                                        p["price"]))
         else:
-            usable.sort(key=lambda p: (-rep.score(p["node_id"]), p["price"]))
+            usable.sort(key=lambda p: (mock_tier(p),
+                                       -rep.score(p["node_id"]), p["price"]))
         return usable
 
     def _learn(self, record: dict[str, Any], ok: bool) -> None:
@@ -444,7 +454,8 @@ class Consumer:
     async def stream_generate(self, prompts: list[Any],
                               params: dict[str, Any] | None = None,
                               chunk_timeout: float = 300.0,
-                              encrypt: bool = True, model: str | None = None):
+                              encrypt: bool = True, model: str | None = None,
+                              first_token_timeout: float = 20.0):
         """Live LLM output over the swarm: an async generator that yields
         ``{"item", "token"}`` events as the provider produces them, then one
         final ``{"done": True, "results", "spent", "provider"}`` summary.
@@ -501,9 +512,26 @@ class Consumer:
 
             streamed_any = False
             failed = False
+            source = stream_request(target_host, target_port, wire_message,
+                                    timeout=chunk_timeout)
             try:
-                async for raw in stream_request(target_host, target_port,
-                                                wire_message, timeout=chunk_timeout):
+                while True:
+                    # Until the first token arrives only wait briefly: a ship
+                    # that accepts the job but never produces output must be
+                    # abandoned and the next one tried, or interactive chat
+                    # hangs for minutes on a single stalled provider.
+                    budget = chunk_timeout if streamed_any else first_token_timeout
+                    try:
+                        raw = await asyncio.wait_for(source.__anext__(),
+                                                     timeout=budget)
+                    except StopAsyncIteration:
+                        break
+                    except asyncio.TimeoutError:
+                        last_error = (f"stream stalled after {budget:.0f}s"
+                                      if streamed_any else
+                                      f"no output within {budget:.0f}s")
+                        failed = True
+                        break
                     event = raw
                     if box_key is not None and "enc" in raw:
                         try:
@@ -526,7 +554,8 @@ class Consumer:
                             self.node.reputation.record(record["node_id"], "chunk_ok")
                             self._learn(record, True)
                             yield {"done": True, "results": event.get("results"),
-                                   "spent": amount, "provider": record["node_id"]}
+                                   "spent": amount, "provider": record["node_id"],
+                                   "model": record.get("model")}
                             return
                         last_error = (f"{event.get('error', raw.get('error'))}: "
                                       f"{event.get('detail', raw.get('detail', ''))}")
@@ -535,8 +564,11 @@ class Consumer:
             except NETWORK_ERRORS as exc:
                 last_error = str(exc)
                 failed = True
+            finally:
+                await source.aclose()
             if failed:
                 self.node.reputation.record(record["node_id"], "chunk_fail")
+                self._learn(record, False)
                 log.warning("streaming via %s failed: %s",
                             record["node_id"][:12], last_error)
                 if streamed_any:

@@ -25,6 +25,7 @@ from .consumer import Consumer, JobError
 log = logging.getLogger("kemi.openai")
 
 MAX_BODY = 8 * 1024 * 1024
+REQUEST_DEADLINE = 180.0  # overall cap per request; past it the client gets 504
 
 
 def _flatten_messages(messages: list[dict[str, Any]]) -> str:
@@ -38,11 +39,13 @@ def _flatten_messages(messages: list[dict[str, Any]]) -> str:
 
 
 class OpenAIGateway:
-    def __init__(self, node, host: str = "127.0.0.1", port: int = 11434):
+    def __init__(self, node, host: str = "127.0.0.1", port: int = 11434,
+                 deadline: float = REQUEST_DEADLINE):
         self.node = node
         self.consumer = Consumer(node)
         self.host = host
         self.port = port
+        self.deadline = deadline
         self._server: asyncio.Server | None = None
 
     async def start(self) -> None:
@@ -130,9 +133,14 @@ class OpenAIGateway:
             await self._chat_stream(writer, prompt, model, max_tokens, cid, created)
             return
         try:
-            text = await self._generate(prompt, model, max_tokens)
+            text = await asyncio.wait_for(
+                self._generate(prompt, model, max_tokens), timeout=self.deadline)
         except JobError as exc:
             await self._send(writer, 502, {"error": {"message": str(exc)}})
+            return
+        except asyncio.TimeoutError:
+            await self._send(writer, 504, {"error": {"message":
+                f"the fleet produced no answer within {self.deadline:.0f}s"}})
             return
         await self._send(writer, 200, {
             "id": cid, "object": "chat.completion", "created": created,
@@ -176,8 +184,18 @@ class OpenAIGateway:
             writer.write(sse({}, finish="stop"))
             writer.write(b"data: [DONE]\n\n")
             await writer.drain()
-        except (JobError, ConnectionError, OSError):
+        except (ConnectionError, OSError):
             pass
+        except JobError as exc:
+            # Headers are already out, so speak the error in-band instead of
+            # silently dropping the connection and leaving the client waiting.
+            try:
+                writer.write(f"data: {json.dumps({'error': {'message': str(exc)}})}"
+                             "\n\n".encode("utf-8"))
+                writer.write(b"data: [DONE]\n\n")
+                await writer.drain()
+            except (ConnectionError, OSError):
+                pass
 
     async def _embeddings(self, writer, body: bytes) -> None:
         try:
@@ -191,9 +209,14 @@ class OpenAIGateway:
         if model in (None, "kemi-fleet", "default"):
             model = None
         try:
-            vectors = await self.consumer.run_job_embeddings(inputs, model)
+            vectors = await asyncio.wait_for(
+                self.consumer.run_job_embeddings(inputs, model), timeout=self.deadline)
         except JobError as exc:
             await self._send(writer, 502, {"error": {"message": str(exc)}})
+            return
+        except asyncio.TimeoutError:
+            await self._send(writer, 504, {"error": {"message":
+                f"the fleet produced no embeddings within {self.deadline:.0f}s"}})
             return
         data = [{"object": "embedding", "index": i, "embedding": v}
                 for i, v in enumerate(vectors)]
@@ -203,7 +226,8 @@ class OpenAIGateway:
     async def _send(self, writer, status: int, payload: Any) -> None:
         data = json.dumps(payload).encode("utf-8")
         reason = {200: "OK", 400: "Bad Request", 404: "Not Found",
-                  413: "Payload Too Large", 502: "Bad Gateway"}.get(status, "OK")
+                  413: "Payload Too Large", 502: "Bad Gateway",
+                  504: "Gateway Timeout"}.get(status, "OK")
         head = (f"HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\n"
                 f"Content-Length: {len(data)}\r\nConnection: close\r\n\r\n")
         try:

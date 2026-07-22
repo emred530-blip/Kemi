@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -109,6 +110,53 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         except urllib.error.HTTPError as exc:
             status = exc.code
         self.assertEqual(status, 400)
+
+
+class GatewayDeadlineTests(unittest.IsolatedAsyncioTestCase):
+    """A fleet that cannot answer must say so, never hang the client."""
+
+    async def asyncSetUp(self):
+        self.node = PeerNode(Identity.create(difficulty=DIFF), host="127.0.0.1",
+                             port=0, bootstrap=[], difficulty=DIFF, sandbox=False)
+        await self.node.start()
+        self.gw = OpenAIGateway(self.node, host="127.0.0.1", port=0, deadline=0.5)
+        await self.gw.start()
+        self.base = f"http://127.0.0.1:{self.gw.port}"
+
+    async def asyncTearDown(self):
+        await self.gw.stop()
+        await self.node.stop()
+
+    async def test_stuck_fleet_returns_504_not_a_hang(self):
+        async def stuck(prompt, model, max_tokens):
+            await asyncio.sleep(30)
+
+        self.gw._generate = stuck
+        started = time.monotonic()
+        try:
+            status, _ = await asyncio.to_thread(
+                _post, self.base + "/v1/chat/completions",
+                {"messages": [{"role": "user", "content": "hi"}]})
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+        self.assertEqual(status, 504)
+        self.assertLess(time.monotonic() - started, 10)
+
+    async def test_streaming_error_is_spoken_in_band(self):
+        # No providers in this fleet: the SSE stream must carry the error
+        # and a [DONE] instead of silently dropping the connection.
+        def stream():
+            req = urllib.request.Request(
+                self.base + "/v1/chat/completions",
+                data=json.dumps({"messages": [{"role": "user", "content": "hi"}],
+                                 "stream": True}).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return r.read().decode()
+
+        text = await asyncio.to_thread(stream)
+        self.assertIn('"error"', text)
+        self.assertIn("[DONE]", text)
 
 
 if __name__ == "__main__":

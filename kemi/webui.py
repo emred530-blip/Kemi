@@ -403,11 +403,12 @@ class WebUI:
             self._chat["live"] += token
 
         try:
-            reply, spent, provider = await chat_once(
+            reply, spent, provider, served_model = await chat_once(
                 self.consumer, self._chat_history, message, max_tokens=160,
                 on_token=on_token)
             self._chat["log"].append({"role": "fleet", "text": reply,
-                                      "cost": spent, "ship": _ship(provider)})
+                                      "cost": spent, "ship": _ship(provider),
+                                      "model": served_model})
         except JobError as exc:
             self._chat["log"].append({"role": "error", "text": str(exc)})
         except Exception as exc:
@@ -646,7 +647,8 @@ _PAGE = """<!doctype html>
     <h2 data-i18n="chat">Chat with the fleet</h2>
     <div id="chatlog" style="max-height:260px;overflow-y:auto;margin-bottom:10px"></div>
     <form id="chatform" style="grid-template-columns:1fr auto;display:grid;gap:8px">
-      <input id="chatmsg" placeholder="ask the fleet's AI anything…" autocomplete="off">
+      <input id="chatmsg" placeholder="ask the fleet's AI anything…"
+             data-i18n-ph="chatph" autocomplete="off">
       <button type="submit" style="width:auto;padding:7px 14px">send</button>
     </form>
   </section>
@@ -764,8 +766,10 @@ function render(s) {
   $('#chatlog').innerHTML = chat.log.map(m => {
     if (m.role === 'you') return `<div><span class="ok">you ⚓</span> ${esc(m.text)}</div>`;
     if (m.role === 'error') return `<div class="bad">⚠ ${esc(m.text)}</div>`;
+    const via = [`${(m.cost ?? 0).toFixed(2)} cr`, m.ship,
+                 m.model && m.model !== 'mock' ? m.model : ''].filter(Boolean);
     return `<div><span class="lnk">fleet</span> ${esc(m.text)} ` +
-           `<span class="dim">[${(m.cost ?? 0).toFixed(2)} cr · ${esc(m.ship || '')}]</span></div>`;
+           `<span class="dim">[${esc(via.join(' · '))}]</span></div>`;
   }).join('') + liveRow ||
     '<div class="dim">no conversation yet - say hello</div>';
   if (chat.busy || chat.log.length !== window._chatLen) {
@@ -1030,20 +1034,26 @@ const I18N = {
        chat:'Chat with the fleet', ledger:'Ledger (latest transfers)',
        reputation:'Reputation (as this node sees it)', send:'send to the fleet', map:'Fleet map',
        brain:'Synapse brain (self-training)', voice:"Captain's bridge (voice)",
-       voicesend:'send', voicefixlabel:'I meant:'},
+       voicesend:'send', voicefixlabel:'I meant:',
+       chatph:"ask the fleet's AI anything…"},
   tr: {panel:'filo paneli', invite:'⚓ Arkadaş davet et', credits:'kredi',
        welcome:'Hoş geldin! Aşağıdan yapay zekâya sor ya da bir davet paylaş; arkadaşların bilgisayarlarını seninkiyle birleştirsin.',
        providers:'Sağlayıcılar (canlı)', submit:'İş gönder',
        chat:'Filoyla sohbet et', ledger:'Defter (son transferler)',
        reputation:'İtibar (bu düğümün gözünden)', send:'filoya gönder', map:'Filo haritası',
        brain:'Sinaps ağı (kendi kendini eğitir)', voice:'Kaptan köşkü (sesli komut)',
-       voicesend:'gönder', voicefixlabel:'bunu kastetmiştim:'},
+       voicesend:'gönder', voicefixlabel:'bunu kastetmiştim:',
+       chatph:'filonun yapay zekâsına istediğini sor…'},
 };
 function applyLang(lang) {
   const dict = I18N[lang] || I18N.en;
   document.querySelectorAll('[data-i18n]').forEach(el => {
     const v = dict[el.dataset.i18n];
     if (v) el.textContent = v;
+  });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => {
+    const v = dict[el.dataset.i18nPh];
+    if (v) el.placeholder = v;
   });
   document.documentElement.lang = lang;
   $('#langbtn').textContent = lang === 'tr' ? 'EN' : 'TR';
