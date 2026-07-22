@@ -56,6 +56,7 @@ RELAY_RECONNECT_DELAY = 2.0
 
 # Tasks whose output may legitimately differ between runs must not be cached.
 NON_CACHEABLE = frozenset({"ai.generate"})
+STREAM_WARMING_INTERVAL = 5.0  # pre-first-token liveness frames to the consumer
 
 # How often (seconds) transient reputation evidence decays toward neutral.
 REP_DECAY_INTERVAL = 3600.0
@@ -916,6 +917,20 @@ class PeerNode:
             return
         self.gossip_tx(message["payment"])
 
+        async def liveness(evt: str) -> bool:
+            frame: dict[str, Any] = {"evt": evt}
+            try:
+                await emit({"enc": seal(box_key, canonical(frame))}
+                           if box_key else frame)
+                return True
+            except (ConnectionError, OSError):
+                return False
+
+        # Receipt: the consumer now knows its transfer is committed, so it
+        # can mirror the payment locally even if this stream later fails.
+        if not await liveness("accepted"):
+            return
+
         max_tokens = int(params.get("max_tokens", 64))
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
@@ -940,13 +955,27 @@ class PeerNode:
             producer = asyncio.create_task(asyncio.to_thread(produce))
             producer.add_done_callback(lambda t: t.exception())
             deadline = loop.time() + self.task_timeout
+            sent_token = False
             try:
                 while True:
                     remaining = deadline - loop.time()
                     if remaining <= 0:
                         raise asyncio.TimeoutError
-                    kind, a, b = await asyncio.wait_for(queue.get(), timeout=remaining)
+                    wait = (remaining if sent_token
+                            else min(remaining, STREAM_WARMING_INTERVAL))
+                    try:
+                        kind, a, b = await asyncio.wait_for(queue.get(), timeout=wait)
+                    except asyncio.TimeoutError:
+                        if sent_token or remaining <= wait:
+                            raise
+                        # Backend still working on its first token (a model
+                        # loading into memory, say): tell the consumer this
+                        # ship is alive so it isn't abandoned as stalled.
+                        if not await liveness("warming"):
+                            return
+                        continue
                     if kind == "token":
+                        sent_token = True
                         event = {"evt": "token", "item": a, "t": b}
                         await emit(
                             {"enc": seal(box_key, canonical(event))} if box_key else event)

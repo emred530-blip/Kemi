@@ -30,6 +30,7 @@ from .discovery import find_providers
 from .e2e import E2EError, derive_box_key, open_sealed, seal
 from .node import PeerNode
 from .protocol import NETWORK_ERRORS, request, stream_request
+from .tasks import BACKEND_REQUIRED
 
 log = logging.getLogger("kemi.consumer")
 
@@ -205,13 +206,16 @@ class Consumer:
             if model is not None and p.get("model") != model:
                 continue  # multi-model marketplace: consumer pins a model
             usable.append(p)
-        # For AI tasks a ship serving a real model (ollama, transformers, …)
-        # always outranks a mock ship: someone asking the fleet a question
-        # deserves a real answer whenever one is on offer. Within each tier:
-        # best reputation first, then cheapest. Once the ship's brain has
-        # seen enough real outcomes, its prediction seasons the ranking.
+        # For tasks actually served by the AI backend, a ship running a real
+        # model (ollama, transformers, …) always outranks a mock ship:
+        # someone asking the fleet a question deserves a real answer whenever
+        # one is on offer. Other tasks (hash, ai.layer, ai.shard, …) don't
+        # touch the chat backend, so its model name must not re-rank them.
+        # Within each tier: best reputation first, then cheapest. Once the
+        # ship's brain has seen enough real outcomes, its prediction seasons
+        # the ranking.
         def mock_tier(p: dict[str, Any]) -> int:
-            if not task.startswith("ai."):
+            if task not in BACKEND_REQUIRED:
                 return 0
             return 1 if (p.get("model") or "mock") == "mock" else 0
 
@@ -455,7 +459,8 @@ class Consumer:
                               params: dict[str, Any] | None = None,
                               chunk_timeout: float = 300.0,
                               encrypt: bool = True, model: str | None = None,
-                              first_token_timeout: float = 20.0):
+                              first_token_timeout: float = 20.0,
+                              first_token_max: float = 120.0):
         """Live LLM output over the swarm: an async generator that yields
         ``{"item", "token"}`` events as the provider produces them, then one
         final ``{"done": True, "results", "spent", "provider"}`` summary.
@@ -512,15 +517,28 @@ class Consumer:
 
             streamed_any = False
             failed = False
+            # Set once the provider's "accepted" receipt (sent right after it
+            # commits our transfer) or any later frame arrives: from then on
+            # we know the payment is on the global ledger, so on failure we
+            # must mirror it locally too — or our own balance check drifts
+            # optimistic and a failover can overdraw (and self-flag) us.
+            payment_committed = False
+            clock = asyncio.get_running_loop().time
+            token_deadline = clock() + first_token_max
             source = stream_request(target_host, target_port, wire_message,
                                     timeout=chunk_timeout)
             try:
                 while True:
-                    # Until the first token arrives only wait briefly: a ship
-                    # that accepts the job but never produces output must be
-                    # abandoned and the next one tried, or interactive chat
-                    # hangs for minutes on a single stalled provider.
-                    budget = chunk_timeout if streamed_any else first_token_timeout
+                    # Until the first token arrives only wait briefly between
+                    # frames: a dead-silent ship must be abandoned and the
+                    # next one tried, or interactive chat hangs for minutes.
+                    # "warming" liveness frames (e.g. a model loading into
+                    # memory) keep a healthy ship alive up to first_token_max.
+                    if streamed_any:
+                        budget = chunk_timeout
+                    else:
+                        budget = min(first_token_timeout,
+                                     max(0.05, token_deadline - clock()))
                     try:
                         raw = await asyncio.wait_for(source.__anext__(),
                                                      timeout=budget)
@@ -540,13 +558,18 @@ class Consumer:
                             last_error = "undecryptable stream data"
                             failed = True
                             break
-                    if event.get("evt") == "token":
+                    evt = event.get("evt")
+                    if evt in ("accepted", "warming"):
+                        payment_committed = True
+                        continue
+                    if evt == "token":
+                        payment_committed = True
                         streamed_any = True
                         yield {"item": int(event.get("item", 0)),
                                "token": str(event.get("t", ""))}
                         continue
                     if raw.get("end"):
-                        if event.get("evt") == "end" and event.get("ok"):
+                        if evt == "end" and event.get("ok"):
                             # The provider applied our transfer before
                             # streaming; mirror it locally and gossip.
                             ledger.add_tx(tx)
@@ -557,8 +580,10 @@ class Consumer:
                                    "spent": amount, "provider": record["node_id"],
                                    "model": record.get("model")}
                             return
-                        last_error = (f"{event.get('error', raw.get('error'))}: "
-                                      f"{event.get('detail', raw.get('detail', ''))}")
+                        code = event.get("error", raw.get("error"))
+                        if code in ("task_failed", "task_timeout"):
+                            payment_committed = True  # emitted only post-payment
+                        last_error = f"{code}: {event.get('detail', raw.get('detail', ''))}"
                         failed = True
                         break
             except NETWORK_ERRORS as exc:
@@ -567,6 +592,9 @@ class Consumer:
             finally:
                 await source.aclose()
             if failed:
+                if payment_committed:
+                    ledger.add_tx(tx)
+                    self.node.gossip_tx(tx)
                 self.node.reputation.record(record["node_id"], "chunk_fail")
                 self._learn(record, False)
                 log.warning("streaming via %s failed: %s",

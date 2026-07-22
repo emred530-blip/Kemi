@@ -160,6 +160,10 @@ class FleetAnswersTests(unittest.IsolatedAsyncioTestCase):
         # non-AI tasks keep the reputation/price order: cheap ship first
         hashes = await consumer.list_providers("hash.sha256")
         self.assertEqual(hashes[0]["price"], 0.2)
+        # tasks that don't touch the chat backend (sharded layers, …) must
+        # not be re-ranked by an irrelevant model name either
+        layers = await consumer.list_providers("ai.layer")
+        self.assertEqual(layers[0]["price"], 0.2)
 
     async def test_stalled_provider_fails_over_before_first_token(self):
         from kemi.consumer import Consumer
@@ -183,6 +187,36 @@ class FleetAnswersTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(time.monotonic() - started, 6.0)
         self.assertLess(me.reputation.score(stall.identity.node_id),
                         me.reputation.score(healthy.identity.node_id))
+        # The abandoned ship committed our payment (it sent the "accepted"
+        # receipt), so the local ledger must mirror BOTH transfers — a
+        # failover that forgets the first one could overdraw the account
+        # and get it permanently flagged.
+        self.assertAlmostEqual(me.ledger.balance(me.identity.node_id),
+                               100.0 - 0.2 - 1.0, places=6)
+
+    async def test_warming_ship_is_not_abandoned_while_loading(self):
+        from kemi import node as node_module
+        from kemi.consumer import Consumer
+
+        old_interval = node_module.STREAM_WARMING_INTERVAL
+        node_module.STREAM_WARMING_INTERVAL = 0.5
+        try:
+            slow = await self._spawn(provide=True, price=0.5,
+                                     ai_backend=_StallBackend(delay=2.0))
+            me = await self._spawn()
+            consumer = Consumer(me)
+            done = None
+            # 1.2s of dead silence would abandon the ship, but its periodic
+            # "warming" liveness frames (every 0.5s) keep it hired while the
+            # model takes 2s to produce a first token.
+            async for event in consumer.stream_generate(
+                    ["ahoy"], {"max_tokens": 4}, first_token_timeout=1.2):
+                if event.get("done"):
+                    done = event
+            self.assertIsNotNone(done)
+            self.assertEqual(done["provider"], slow.identity.node_id)
+        finally:
+            node_module.STREAM_WARMING_INTERVAL = old_interval
 
 
 if __name__ == "__main__":

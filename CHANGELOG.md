@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.8.1 — Streaming payments made airtight
+Found by an adversarial multi-agent review of 1.8.0; all three confirmed
+findings fixed:
+- Payment receipts: a provider now sends an `accepted` frame the moment it
+  commits the consumer's transfer. A consumer that abandons a stalled
+  stream after that receipt mirrors the payment into its own ledger replica
+  before hiring the next ship — previously the forgotten transfer could
+  overdraw the account on failover and get it permanently flagged as a
+  double-spender.
+- Warming liveness: until the first token, providers emit a `warming` frame
+  every 5 s (e.g. while a model loads into memory), so the first-token
+  timeout only abandons dead-silent ships — a healthy Ollama ship cold-
+  starting a 7B model is no longer dumped for a mock answer. First-token
+  knobs are plumbed through `Fleet.stream`.
+- Real-vs-mock tier preference now applies only to tasks the chat backend
+  actually serves (`ai.generate`, `ai.embed`); sharded-layer and other
+  `ai.*` tasks keep pure reputation/price ranking.
+- SPEC: documented the receipt/warming frames and the trust limitation of
+  self-advertised model names.
+
 ## 1.8.0 — The fleet answers people
 - When someone asks the fleet a question, a ship serving a *real* model
   (Ollama, transformers) now always outranks a mock ship, however cheap the

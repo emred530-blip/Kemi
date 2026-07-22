@@ -124,11 +124,15 @@ class Fleet:
 
     async def stream(self, prompt: str, *, max_tokens: int = 128,
                      chunk_timeout: float = 300.0,
-                     model: str | None = None) -> AsyncIterator[str]:
+                     model: str | None = None,
+                     first_token_timeout: float = 20.0,
+                     first_token_max: float = 120.0) -> AsyncIterator[str]:
         """Yield completion tokens live as a provider generates them."""
         async for event in self._consumer.stream_generate(
                 [prompt], {"max_tokens": max_tokens},
-                chunk_timeout=chunk_timeout, model=model):
+                chunk_timeout=chunk_timeout, model=model,
+                first_token_timeout=first_token_timeout,
+                first_token_max=first_token_max):
             if event.get("done"):
                 return
             yield event["token"]
