@@ -540,7 +540,7 @@ _PAGE = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0d1117">
+<meta name="theme-color" content="#0a1120">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Kemi">
@@ -550,51 +550,69 @@ _PAGE = """<!doctype html>
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <title>kemi — fleet panel</title>
 <style>
-  :root { --bg:#0d1117; --card:#161b22; --line:#21262d; --fg:#e6edf3;
-          --dim:#8b949e; --acc:#3fb950; --warn:#f85149; --link:#58a6ff; }
+  :root { --bg:#0a1120; --card:#101c31; --card-2:#0e1930; --line:#1d2c47;
+          --line-soft:#16233c; --fg:#e9eef7; --dim:#93a1bc; --faint:#5f6d8c;
+          --acc:#57d9c0; --warn:#f27d8a; --link:#7db2ff; --brass:#e7b75f;
+          --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif; }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg);
+  body { margin:0; color:var(--fg);
+         background:radial-gradient(80rem 36rem at 50% -14rem, #162543 0%, transparent 60%),
+                    var(--bg);
          font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
   header { display:flex; align-items:baseline; gap:16px; padding:14px 22px;
-           border-bottom:1px solid var(--line); flex-wrap:wrap; }
-  header h1 { font-size:18px; margin:0; }
-  header .balance { margin-left:auto; font-size:22px; color:var(--acc); }
+           border-bottom:1px solid var(--line-soft); flex-wrap:wrap;
+           position:sticky; top:0; z-index:5;
+           background:color-mix(in srgb, var(--bg) 84%, transparent);
+           backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); }
+  header h1 { font:600 21px/1 var(--serif); letter-spacing:.02em; margin:0; }
+  header h1 .dim { font:400 12px ui-monospace,Menlo,monospace;
+                   letter-spacing:.18em; text-transform:uppercase; }
+  header .balance { margin-left:auto; font-size:22px; color:var(--brass);
+                    font-variant-numeric:tabular-nums; }
   header .dim, .dim { color:var(--dim); }
   main { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr));
-         gap:14px; padding:14px 22px; }
+         gap:14px; padding:16px 22px; }
   @media (max-width:640px) {
     main { grid-template-columns:1fr; padding:10px; gap:10px; }
     header { padding:10px; gap:8px; }
-    header h1 { font-size:16px; }
+    header h1 { font-size:17px; }
     header .balance { font-size:18px; }
     #welcome { padding:6px 10px; font-size:13px; }
     input, select, textarea, button { font-size:16px; }  /* avoid iOS zoom */
   }
-  section { background:var(--card); border:1px solid var(--line);
-            border-radius:8px; padding:14px 16px; overflow-x:auto; }
-  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em;
-       color:var(--dim); margin:0 0 10px; }
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th { text-align:left; color:var(--dim); font-weight:normal;
-       border-bottom:1px solid var(--line); padding:3px 8px 3px 0; }
-  td { padding:4px 8px 4px 0; border-bottom:1px solid var(--line); }
+  section { background:linear-gradient(170deg, var(--card), var(--card-2));
+            border:1px solid var(--line-soft); border-radius:14px;
+            padding:15px 17px; overflow-x:auto; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.14em;
+       color:var(--faint); margin:0 0 12px; }
+  table { width:100%; border-collapse:collapse; font-size:13px;
+          font-variant-numeric:tabular-nums; }
+  th { text-align:left; color:var(--faint); font-weight:normal;
+       border-bottom:1px solid var(--line); padding:3px 8px 5px 0;
+       font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
+  td { padding:5px 8px 5px 0; border-bottom:1px solid var(--line-soft); }
   tr:last-child td { border-bottom:none; }
   .ok { color:var(--acc); } .bad { color:var(--warn); } .lnk { color:var(--link); }
-  .tag { background:var(--line); border-radius:4px; padding:1px 6px;
+  .tag { background:rgba(29,44,71,.7); border:1px solid var(--line);
+         border-radius:999px; padding:1px 8px;
          font-size:11px; margin-right:4px; white-space:nowrap; }
   form { display:grid; gap:8px; }
   label { color:var(--dim); font-size:12px; }
   input, select, textarea, button {
-    background:var(--bg); color:var(--fg); border:1px solid var(--line);
-    border-radius:6px; padding:7px 9px; font:inherit; width:100%; }
+    background:rgba(10,17,32,.7); color:var(--fg); border:1px solid var(--line);
+    border-radius:9px; padding:8px 10px; font:inherit; width:100%; }
+  input:focus, select:focus, textarea:focus { outline:none; border-color:var(--acc); }
   textarea { min-height:64px; resize:vertical; }
   .row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
-  button { background:#1f6feb; border:none; cursor:pointer; font-weight:bold; }
-  button:hover { filter:brightness(1.15); }
-  button.tpl { background:var(--line); color:var(--fg); font-weight:normal;
-               width:auto; padding:3px 9px; margin:2px; font-size:12px; }
+  button { background:linear-gradient(160deg, #e7b75f, #c9954a); color:#221604;
+           border:none; cursor:pointer; font-weight:bold; }
+  button:hover { filter:brightness(1.08); }
+  button.tpl { background:rgba(29,44,71,.7); border:1px solid var(--line);
+               color:var(--fg); font-weight:normal;
+               width:auto; padding:3px 10px; margin:2px; font-size:12px; }
+  :focus-visible { outline:2px solid var(--acc); outline-offset:1px; }
   #jobmsg { min-height:18px; font-size:12px; }
-  footer { padding:8px 22px 20px; color:var(--dim); font-size:12px; }
+  footer { padding:8px 22px 20px; color:var(--faint); font-size:12px; }
 </style></head><body>
 <header>
   <h1>kemi <span class="dim" data-i18n="panel">fleet panel</span></h1>

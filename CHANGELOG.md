@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.1 — The night-sea identity (UI/UX facelift)
+- The harbor got a designed visual identity instead of a generic dark
+  theme: a "night sea" world — deep navy grounds, brass (credits/ledger)
+  and phosphor teal (live fleet) accents, a serif captain's-log display
+  face for the brand and hero, mono tabular numerals for everything
+  ledger-like.
+- New harbor landing: a hero thesis ("Merkezi olmayan yapay zekâ"), a live
+  harbor board (ships online · models · credits per ask) and one-tap
+  starter questions; the hero folds away once the conversation starts.
+  Refined chat bubbles with fleet avatars, dashed-ledger provenance stamps,
+  a phosphor streaming cursor and buoy-light thinking dots. Floating
+  glass composer with a brass send button.
+- Micro-interactions throughout (message rise-in, beacon pulse, hover
+  lifts) — all disabled under prefers-reduced-motion. Accessibility pass:
+  aria-live chat log, labeled controls, visible focus rings, contrast
+  checked. Phone header no longer overflows.
+- The captain's dashboard was restyled to the same token family so the
+  product reads as one system (brass primaries, phosphor status, elevated
+  cards, sticky glass header) — markup and behavior untouched.
+
 ## 1.9.0 — The harbor: Kemi as a web app
 - `kemi web` (alias `liman`) opens a public harbor: a mobile-first web app
   where anyone chats with the fleet from a browser — no install, no

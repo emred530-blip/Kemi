@@ -325,100 +325,243 @@ _PAGE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Kemi Limanı — filoya sor</title>
+<meta name="theme-color" content="#060b16">
+<title>Kemi Limanı — merkezi olmayan yapay zekâ</title>
 <style>
-  :root { --bg:#0b1020; --card:#141a30; --edge:#232c4e; --ink:#e8ecff;
-          --dim:#8b93b8; --gold:#f5c96b; --teal:#4fd1c5; --bad:#ff7b8a; }
+  :root {
+    --sea-deep:#060b16; --sea:#0b1424; --hull:#101c31; --hull-2:#0e1930;
+    --edge:#1d2c47; --edge-soft:#16233c;
+    --foam:#e9eef7; --mist:#97a3be; --faint:#5f6d8c;
+    --brass:#e7b75f; --brass-deep:#c9954a; --phosphor:#57d9c0; --flare:#f27d8a;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
   * { box-sizing:border-box; margin:0; }
-  body { background:radial-gradient(1200px 600px at 70% -10%, #1a2247 0%, var(--bg) 55%);
-         color:var(--ink); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;
-         min-height:100dvh; display:flex; flex-direction:column; }
-  header { display:flex; align-items:center; gap:10px; padding:14px 16px;
-           border-bottom:1px solid var(--edge); position:sticky; top:0;
-           background:rgba(11,16,32,.85); backdrop-filter:blur(8px); z-index:5; }
-  header h1 { font-size:18px; letter-spacing:.5px; }
-  header h1 b { color:var(--gold); }
-  .chip { margin-left:auto; display:flex; gap:8px; align-items:center; }
-  .pill { border:1px solid var(--edge); background:var(--card); border-radius:999px;
-          padding:4px 12px; font-size:13px; color:var(--dim); white-space:nowrap; }
-  .pill b { color:var(--teal); font-variant-numeric:tabular-nums; }
-  #langbtn { cursor:pointer; color:var(--ink); }
-  main { flex:1; width:100%; max-width:760px; margin:0 auto; padding:16px 14px 120px; }
-  .hello { background:linear-gradient(160deg,#182042,#12172e); border:1px solid var(--edge);
-           border-radius:16px; padding:18px; margin-bottom:16px; }
-  .hello h2 { font-size:16px; margin-bottom:6px; color:var(--gold); }
-  .hello p { color:var(--dim); font-size:14px; }
-  .hello .fleetline { margin-top:10px; font-size:13px; color:var(--teal); }
-  .msg { display:flex; margin:10px 0; }
-  .msg .bubble { max-width:85%; padding:10px 14px; border-radius:16px; font-size:15px;
-                 white-space:pre-wrap; word-break:break-word; }
+  html { scroll-behavior:smooth; }
+  body {
+    background:var(--sea-deep); color:var(--foam);
+    font:16px/1.55 var(--sans);
+    min-height:100dvh; display:flex; flex-direction:column;
+  }
+  /* the night sea: a horizon glow and a faint phosphorescent drift */
+  .sky { position:fixed; inset:0; z-index:-1; pointer-events:none;
+    background:
+      radial-gradient(90rem 42rem at 50% -18rem, #172747 0%, transparent 60%),
+      radial-gradient(50rem 26rem at 82% 108%, rgba(87,217,192,.07) 0%, transparent 65%),
+      var(--sea-deep); }
+  .sky::after { content:""; position:absolute; left:0; right:0; top:34dvh; height:1px;
+    background:linear-gradient(90deg, transparent, rgba(231,183,95,.25), transparent); }
+
+  header { display:flex; align-items:center; gap:12px;
+    padding:14px clamp(14px, 4vw, 28px);
+    position:sticky; top:0; z-index:10;
+    background:color-mix(in srgb, var(--sea-deep) 82%, transparent);
+    backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--edge-soft); }
+  .brand { display:flex; align-items:baseline; gap:9px; }
+  .brand .anchor { color:var(--brass); font-size:19px; transform:translateY(1px); }
+  .brand .word { font:600 24px/1 var(--serif); letter-spacing:.02em; }
+  .brand .port { font:400 13px/1 var(--sans); color:var(--mist);
+    letter-spacing:.24em; text-transform:uppercase; }
+  .chips { margin-left:auto; display:flex; gap:8px; align-items:center; }
+  .pill { border:1px solid var(--edge); background:rgba(16,28,49,.6);
+    border-radius:999px; padding:5px 13px; font-size:13px; color:var(--mist);
+    white-space:nowrap; font-family:var(--sans); }
+  .pill b { color:var(--brass); font-family:var(--mono);
+    font-variant-numeric:tabular-nums; font-weight:600; }
+  #fleetpill { color:var(--phosphor); }
+  #fleetpill::before { content:""; display:inline-block; width:6px; height:6px;
+    border-radius:50%; background:var(--phosphor); margin-right:7px;
+    vertical-align:1px; animation:beacon 2.6s ease-in-out infinite; }
+  button.pill { cursor:pointer; color:var(--foam); }
+  button.pill:hover { border-color:var(--brass); }
+
+  main { flex:1; width:100%; max-width:720px; margin:0 auto;
+    padding:0 16px 132px; }
+
+  /* hero — the harbor gate. Compacts once the conversation starts. */
+  .hero { text-align:center; padding:clamp(30px, 7dvh, 64px) 8px 8px;
+    transition:opacity .3s ease; }
+  .hero h1 { font:600 clamp(30px, 6vw, 42px)/1.15 var(--serif);
+    letter-spacing:.01em; text-wrap:balance; }
+  .hero h1 em { font-style:normal; color:var(--brass); }
+  .hero > p { margin:14px auto 0; max-width:34em; color:var(--mist);
+    font-size:15.5px; text-wrap:pretty; }
+  .board { display:flex; justify-content:center; gap:10px; flex-wrap:wrap;
+    margin:26px 0 6px; }
+  .cell { border:1px solid var(--edge-soft); background:rgba(14,25,48,.55);
+    border-radius:12px; padding:10px 18px; min-width:104px; }
+  .cell .n { font:600 20px/1.2 var(--mono); color:var(--foam);
+    font-variant-numeric:tabular-nums; }
+  .cell .n.live { color:var(--phosphor); }
+  .cell .n.gold { color:var(--brass); }
+  .cell .l { font-size:11px; color:var(--faint); letter-spacing:.14em;
+    text-transform:uppercase; margin-top:3px; }
+  .starters { display:flex; flex-wrap:wrap; gap:8px; justify-content:center;
+    margin-top:26px; }
+  .starter { border:1px solid var(--edge); background:transparent;
+    color:var(--mist); border-radius:999px; padding:9px 16px; font-size:14px;
+    font-family:var(--sans); cursor:pointer;
+    transition:border-color .15s ease, color .15s ease, transform .15s ease; }
+  .starter:hover { border-color:var(--phosphor); color:var(--foam);
+    transform:translateY(-1px); }
+  body.sailing .hero { padding:18px 8px 0; }
+  body.sailing .hero h1 { font-size:0; }
+  body.sailing .hero h1::after { content:""; }
+  body.sailing .hero > p, body.sailing .starters, body.sailing .board { display:none; }
+
+  /* the conversation */
+  #chatlog { padding-top:14px; }
+  .msg { display:flex; gap:10px; margin:14px 0; animation:rise .28s ease both; }
   .msg.you { justify-content:flex-end; }
-  .msg.you .bubble { background:#2a3560; border-bottom-right-radius:4px; }
-  .msg.fleet .bubble { background:var(--card); border:1px solid var(--edge);
-                       border-bottom-left-radius:4px; }
-  .msg.error .bubble { background:#3a1b26; border:1px solid #5c2635; color:var(--bad); }
-  .stamp { display:block; margin-top:6px; font-size:12px; color:var(--dim); }
-  .stamp b { color:var(--gold); font-weight:600; }
-  .typing { color:var(--dim); }
-  form { position:fixed; bottom:0; left:0; right:0; padding:12px 14px
-         calc(12px + env(safe-area-inset-bottom)); background:rgba(11,16,32,.92);
-         backdrop-filter:blur(8px); border-top:1px solid var(--edge); }
-  .row { display:flex; gap:8px; max-width:760px; margin:0 auto; }
-  input { flex:1; background:var(--card); color:var(--ink); border:1px solid var(--edge);
-          border-radius:12px; padding:12px 14px; font-size:16px; outline:none; }
-  input:focus { border-color:var(--teal); }
-  button { background:var(--gold); color:#1a1405; border:0; border-radius:12px;
-           padding:0 18px; font-size:15px; font-weight:700; cursor:pointer; }
-  button:disabled { opacity:.5; }
-  .note { max-width:760px; margin:6px auto 0; font-size:12px; color:var(--dim);
-          text-align:center; }
-  a { color:var(--teal); }
+  .avatar { flex:0 0 30px; width:30px; height:30px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; font-size:14px;
+    background:radial-gradient(circle at 32% 28%, #1b3a56, #0e2237);
+    border:1px solid var(--edge); color:var(--phosphor); align-self:flex-end; }
+  .bubble { max-width:82%; padding:11px 15px; border-radius:18px;
+    font-size:15.5px; white-space:pre-wrap; word-break:break-word; }
+  .msg.you .bubble { background:linear-gradient(160deg, #223257, #1b2947);
+    border:1px solid #2c3d63; border-bottom-right-radius:6px; }
+  .msg.fleet .bubble { background:var(--hull);
+    border:1px solid var(--edge-soft); border-bottom-left-radius:6px; }
+  .msg.error .bubble { background:rgba(242,125,138,.08);
+    border:1px solid rgba(242,125,138,.35); color:var(--flare); }
+  .stamp { display:flex; align-items:center; gap:6px; margin-top:9px;
+    padding-top:8px; border-top:1px dashed var(--edge);
+    font:11.5px/1 var(--mono); color:var(--faint); letter-spacing:.03em; }
+  .stamp .coin { color:var(--brass); font-size:10px; }
+  .stamp b { color:var(--mist); font-weight:500; }
+  .typing { color:var(--mist); }
+  .cursor { display:inline-block; width:7px; height:15px; margin-left:2px;
+    background:var(--phosphor); vertical-align:-2px;
+    animation:blink 1s steps(2) infinite; }
+  .buoys { display:inline-flex; gap:5px; align-items:center; }
+  .buoys i { width:6px; height:6px; border-radius:50%; background:var(--phosphor);
+    animation:buoy 1.2s ease-in-out infinite; }
+  .buoys i:nth-child(2) { animation-delay:.18s; }
+  .buoys i:nth-child(3) { animation-delay:.36s; }
+
+  /* the dock — composer */
+  form { position:fixed; bottom:0; left:0; right:0; z-index:10;
+    padding:10px 14px calc(12px + env(safe-area-inset-bottom));
+    background:linear-gradient(transparent, var(--sea-deep) 34%); }
+  .dock { display:flex; gap:8px; max-width:720px; margin:0 auto;
+    background:rgba(16,28,49,.88); border:1px solid var(--edge);
+    border-radius:999px; padding:6px 6px 6px 20px;
+    backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+    transition:border-color .15s ease; }
+  .dock:focus-within { border-color:var(--phosphor); }
+  input { flex:1; background:transparent; color:var(--foam); border:0;
+    font:16px var(--sans); outline:none; min-width:0; }
+  input::placeholder { color:var(--faint); }
+  #askbtn { flex:0 0 42px; width:42px; height:42px; border-radius:50%;
+    border:0; cursor:pointer; display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(160deg, var(--brass), var(--brass-deep));
+    color:#221604; transition:transform .12s ease, opacity .2s; }
+  #askbtn:hover { transform:scale(1.06); }
+  #askbtn:active { transform:scale(.94); }
+  #askbtn:disabled { opacity:.45; transform:none; cursor:default; }
+  .note { max-width:720px; margin:8px auto 0; font-size:11.5px; color:var(--faint);
+    text-align:center; font-family:var(--mono); letter-spacing:.02em; }
+  .note b { color:var(--mist); font-weight:500; }
+
+  :focus-visible { outline:2px solid var(--phosphor); outline-offset:2px;
+    border-radius:6px; }
+  @keyframes rise { from { opacity:0; transform:translateY(8px); } }
+  @keyframes blink { 50% { opacity:0; } }
+  @keyframes buoy { 0%,100% { opacity:.25; transform:translateY(0); }
+                    50% { opacity:1; transform:translateY(-3px); } }
+  @keyframes beacon { 0%,100% { opacity:.4; } 50% { opacity:1; } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation:none !important; transition:none !important; }
+  }
+  @media (max-width:520px) {
+    .brand .port { display:none; }
+    .bubble { max-width:88%; }
+    header { gap:8px; }
+    .chips { gap:6px; }
+    .pill { padding:4px 10px; font-size:12px; }
+    .pill span[data-i18n="credits"] { display:none; }
+    #fleetpill { max-width:34vw; overflow:hidden; text-overflow:ellipsis; }
+  }
 </style>
 </head>
 <body>
+<div class="sky" aria-hidden="true"></div>
 <header>
-  <h1>⚓ <span data-i18n="title">Kemi <b>Limanı</b></span></h1>
-  <div class="chip">
-    <span class="pill" id="fleetpill">…</span>
+  <div class="brand">
+    <span class="anchor" aria-hidden="true">⚓</span>
+    <span class="word">Kemi</span>
+    <span class="port" data-i18n="port">Limanı</span>
+  </div>
+  <div class="chips">
+    <span class="pill" id="fleetpill" role="status">…</span>
     <span class="pill"><b id="balance">…</b> <span data-i18n="credits">kredi</span></span>
-    <span class="pill" id="langbtn">EN</span>
+    <button type="button" class="pill" id="langbtn" aria-label="language">EN</button>
   </div>
 </header>
 <main>
-  <div class="hello" id="hello">
-    <h2 data-i18n="hellohead">Hoş geldin kaptan!</h2>
-    <p data-i18n="hellobody">Buradaki yapay zekânın merkezi yok: sorunu filodaki başka
-    kullanıcıların gemileri cevaplar ve her cevabın altında hangi geminin, hangi modelle,
-    kaç krediye ürettiği yazar. Hesabına hoş geldin kredisi tanımlandı — sor bakalım.</p>
-    <div class="fleetline" id="fleetline"></div>
-  </div>
-  <div id="chatlog"></div>
+  <section class="hero" id="hero">
+    <h1 data-i18n="herohead">Merkezi olmayan <em>yapay zekâ</em></h1>
+    <p data-i18n="herobody">Sorunu bir şirketin sunucusu değil, filodaki başka
+    insanların gemileri cevaplar. Her cevabın altında hangi geminin, hangi modelle,
+    kaç krediye ürettiği yazılıdır — hoş geldin kredin hazır.</p>
+    <div class="board" id="board" aria-label="fleet">
+      <div class="cell"><div class="n live" id="bships">–</div>
+        <div class="l" data-i18n="bships">gemi çevrimiçi</div></div>
+      <div class="cell"><div class="n" id="bmodels">–</div>
+        <div class="l" data-i18n="bmodels">model</div></div>
+      <div class="cell"><div class="n gold" id="bprice">–</div>
+        <div class="l" data-i18n="bprice">kredi / soru</div></div>
+    </div>
+    <div class="starters" id="starters"></div>
+  </section>
+  <div id="chatlog" aria-live="polite"></div>
 </main>
 <form id="askform" autocomplete="off">
-  <div class="row">
-    <input id="askmsg" data-i18n-ph="askph" placeholder="filoya bir şey sor…" maxlength="2000">
-    <button id="askbtn" type="submit" data-i18n="send">gönder</button>
+  <div class="dock">
+    <input id="askmsg" data-i18n-ph="askph" placeholder="filoya bir şey sor…"
+           maxlength="2000" aria-label="message">
+    <button id="askbtn" type="submit" aria-label="send" data-i18n-title="send">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4 12h14m0 0-6-6m6 6-6 6" stroke="currentColor"
+              stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
   </div>
-  <div class="note" data-i18n="note">cevaplar filodaki gemilerden gelir — merkezî sunucu yok ·
-  kendi gemini katmak için: <b>pip install kemi && kemi app</b></div>
+  <p class="note" data-i18n="note">cevaplar filodan gelir — merkezî sunucu yok ·
+    kendi gemin: <b>pip install kemi && kemi app</b></p>
 </form>
 <script>
 const $ = s => document.querySelector(s);
 const esc = t => String(t).replace(/[&<>"']/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const I18N = {
-  tr: { title:'Kemi <b>Limanı</b>', credits:'kredi', hellohead:'Hoş geldin kaptan!',
-        hellobody:'Buradaki yapay zekânın merkezi yok: sorunu filodaki başka kullanıcıların gemileri cevaplar ve her cevabın altında hangi geminin, hangi modelle, kaç krediye ürettiği yazar. Hesabına hoş geldin kredisi tanımlandı — sor bakalım.',
-        send:'gönder', askph:'filoya bir şey sor…',
-        note:'cevaplar filodaki gemilerden gelir — merkezî sunucu yok · kendi gemini katmak için: pip install kemi && kemi app',
+  tr: { port:'Limanı', credits:'kredi',
+        herohead:'Merkezi olmayan <em>yapay zekâ</em>',
+        herobody:'Sorunu bir şirketin sunucusu değil, filodaki başka insanların gemileri cevaplar. Her cevabın altında hangi geminin, hangi modelle, kaç krediye ürettiği yazılıdır — hoş geldin kredin hazır.',
+        bships:'gemi çevrimiçi', bmodels:'model', bprice:'kredi / soru',
+        askph:'filoya bir şey sor…', send:'gönder',
+        note:'cevaplar filodan gelir — merkezî sunucu yok · kendi gemin: <b>pip install kemi && kemi app</b>',
         ships:n=>`${n} gemi çevrimiçi`, noships:'filo aranıyor…',
-        via:(c,s,m)=>`${c} kredi · ${s}${m?' · '+m:''}`, thinking:'filo düşünüyor…' },
-  en: { title:'Kemi <b>Harbor</b>', credits:'credits', hellohead:'Welcome aboard, captain!',
-        hellobody:'This AI has no center: your question is answered by other users\' ships in the fleet, and every answer is stamped with the ship, the model and the credits it cost. Welcome credits are on your account — ask away.',
-        send:'send', askph:'ask the fleet anything…',
-        note:'answers come from ships in the fleet — no central server · add your own ship: pip install kemi && kemi app',
+        via:(c,s,m)=>`${c} kr — ${s}${m ? ' — ' + m : ''}`,
+        thinking:'filo düşünüyor', starters:[
+          'Kemi nasıl çalışıyor, kim cevap veriyor?',
+          'Bana kısa bir deniz hikâyesi anlat',
+          'Kredi sistemi neden adil?' ] },
+  en: { port:'Harbor', credits:'credits',
+        herohead:'Decentralised <em>intelligence</em>',
+        herobody:'Your question is answered by other people’s ships in the fleet, not a company server. Every answer is stamped with the ship, the model and the credits it cost — your welcome credits are ready.',
+        bships:'ships online', bmodels:'models', bprice:'credits / ask',
+        askph:'ask the fleet anything…', send:'send',
+        note:'answers come from the fleet — no central server · your own ship: <b>pip install kemi && kemi app</b>',
         ships:n=>`${n} ships online`, noships:'searching the fleet…',
-        via:(c,s,m)=>`${c} credits · ${s}${m?' · '+m:''}`, thinking:'the fleet is thinking…' },
+        via:(c,s,m)=>`${c} cr — ${s}${m ? ' — ' + m : ''}`,
+        thinking:'the fleet is thinking', starters:[
+          'How does Kemi work — who answers me?',
+          'Tell me a short sea story',
+          'Why is the credit system fair?' ] },
 };
 let LANG = localStorage.getItem('kemi-harbor-lang') || 'tr';
 function applyLang() {
@@ -433,9 +576,17 @@ function applyLang() {
   });
   document.documentElement.lang = LANG;
   $('#langbtn').textContent = LANG === 'tr' ? 'EN' : 'TR';
+  $('#starters').innerHTML = d.starters.map(q =>
+    `<button type="button" class="starter">${esc(q)}</button>`).join('');
   localStorage.setItem('kemi-harbor-lang', LANG);
 }
 $('#langbtn').onclick = () => { LANG = LANG === 'tr' ? 'en' : 'tr'; applyLang(); render(); };
+document.addEventListener('click', ev => {
+  const b = ev.target.closest('.starter');
+  if (!b) return;
+  $('#askmsg').value = b.textContent;
+  $('#askform').requestSubmit();
+});
 
 let TOKEN = localStorage.getItem('kemi-harbor-token') || '';
 let STATE = null;
@@ -447,33 +598,41 @@ async function hello() {
   TOKEN = j.token;
   localStorage.setItem('kemi-harbor-token', TOKEN);
   $('#balance').textContent = j.balance.toFixed(2);
-  fleetPill(j.fleet);
+  fleetBoard(j.fleet);
 }
-function fleetPill(f) {
+function fleetBoard(f) {
   const d = I18N[LANG];
   $('#fleetpill').textContent = f && f.ships ? d.ships(f.ships) : d.noships;
-  $('#fleetline').textContent = f && f.models && f.models.length
-    ? '🧠 ' + f.models.join(' · ') : '';
+  $('#bships').textContent = f ? f.ships : '–';
+  $('#bmodels').textContent = f && f.models && f.models.length
+    ? f.models.length : '–';
+  $('#bmodels').title = f && f.models ? f.models.join(', ') : '';
+  $('#bprice').textContent = f && f.cheapest != null ? f.cheapest.toFixed(2) : '–';
 }
 function render() {
   if (!STATE) return;
   const d = I18N[LANG];
   $('#balance').textContent = STATE.balance.toFixed(2);
-  fleetPill(STATE.fleet);
+  fleetBoard(STATE.fleet);
+  document.body.classList.toggle('sailing',
+    STATE.log.length > 0 || STATE.busy);
+  const av = `<div class="avatar" aria-hidden="true">⚓</div>`;
   const rows = STATE.log.map(m => {
     if (m.role === 'you')
       return `<div class="msg you"><div class="bubble">${esc(m.text)}</div></div>`;
     if (m.role === 'error')
-      return `<div class="msg error"><div class="bubble">⚠ ${esc(m.text)}</div></div>`;
+      return `<div class="msg error">${av}<div class="bubble">${esc(m.text)}</div></div>`;
     const stamp = d.via((m.cost ?? 0).toFixed(2), esc(m.ship || ''),
                         m.model && m.model !== 'mock' ? esc(m.model) : '');
-    return `<div class="msg fleet"><div class="bubble">${esc(m.text)}` +
-           `<span class="stamp">⚓ <b>${stamp}</b></span></div></div>`;
+    return `<div class="msg fleet">${av}<div class="bubble">${esc(m.text)}` +
+           `<div class="stamp"><span class="coin">◈</span><b>${stamp}</b></div></div></div>`;
   });
-  if (STATE.busy) rows.push(`<div class="msg fleet"><div class="bubble typing">` +
-    (STATE.live ? esc(STATE.live) + '▋' : d.thinking) + `</div></div>`);
+  if (STATE.busy) rows.push(`<div class="msg fleet">${av}<div class="bubble typing">` +
+    (STATE.live ? esc(STATE.live) + '<span class="cursor"></span>'
+                : d.thinking + ' <span class="buoys"><i></i><i></i><i></i></span>') +
+    `</div></div>`);
   const el = $('#chatlog');
-  const stick = Math.abs(window.scrollY + innerHeight - document.body.scrollHeight) < 120;
+  const stick = Math.abs(window.scrollY + innerHeight - document.body.scrollHeight) < 140;
   el.innerHTML = rows.join('');
   $('#askbtn').disabled = STATE.busy;
   if (stick && (STATE.busy || rows.length !== window._n)) {
