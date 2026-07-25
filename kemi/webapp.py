@@ -15,11 +15,13 @@ as many harbors as there are captains willing to fund one.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import os
 import secrets
 import time
+from collections import deque
 from typing import Any
 
 from .chat import chat_once
@@ -34,6 +36,7 @@ MAX_MESSAGE = 2000
 MAX_LOG = 60                 # chat entries kept per guest
 ASK_COOLDOWN = 2.0           # seconds between questions per guest
 MAX_CONCURRENT_CHATS = 4     # fleet-bound questions in flight, harbor-wide
+ASKS_KEPT = 400              # answered-question records kept for the admin panel
 
 
 def _now() -> float:
@@ -44,14 +47,17 @@ class WebApp:
     """A multi-visitor chat portal backed by one consumer node."""
 
     def __init__(self, node, host: str = "0.0.0.0", port: int = 8090,
-                 faucet: float = 10.0, state_path: str | None = None):
+                 faucet: float = 10.0, state_path: str | None = None,
+                 admin_key: str | None = None):
         self.node = node
         self.consumer = Consumer(node)
         self.host = host
         self.port = port
         self.faucet = float(faucet)
         self.state_path = state_path
+        self.admin_key = admin_key or secrets.token_urlsafe(12)
         self._guests: dict[str, dict[str, Any]] = {}
+        self._asks: deque[dict[str, Any]] = deque(maxlen=ASKS_KEPT)
         self._server: asyncio.Server | None = None
         self._chat_slots = asyncio.Semaphore(MAX_CONCURRENT_CHATS)
         self._providers_cache: list[dict[str, Any]] = []
@@ -104,10 +110,14 @@ class WebApp:
                     "seen": float(g.get("seen", _now())),
                     "spent": float(g.get("spent", 0.0)),
                     "asks": int(g.get("asks", 0)),
+                    "banned": bool(g.get("banned", False)),
                     "log": list(g.get("log", []))[-MAX_LOG:],
                     "history": [tuple(x) for x in g.get("history", [])][-8:],
                     "live": "", "busy": False, "last_ask": 0.0,
                 }
+            if isinstance(saved.get("faucet"), (int, float)):
+                self.faucet = float(saved["faucet"])
+            self._asks.extend(list(saved.get("asks", []))[-ASKS_KEPT:])
         except (ValueError, OSError, TypeError):
             log.warning("could not read harbor state at %s; starting fresh",
                         self.state_path)
@@ -119,12 +129,13 @@ class WebApp:
         for token, g in self._guests.items():
             durable[token] = {k: g[k] for k in
                               ("name", "balance", "created", "seen",
-                               "spent", "asks", "log", "history")}
+                               "spent", "asks", "banned", "log", "history")}
         tmp = f"{self.state_path}.tmp"
         try:
             os.makedirs(os.path.dirname(self.state_path) or ".", exist_ok=True)
             with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump({"guests": durable}, fh, ensure_ascii=False)
+                json.dump({"guests": durable, "faucet": self.faucet,
+                           "asks": list(self._asks)}, fh, ensure_ascii=False)
             os.replace(tmp, self.state_path)
         except OSError:
             log.warning("could not persist harbor state to %s", self.state_path)
@@ -146,7 +157,7 @@ class WebApp:
             "name": ship_name(f"guest:{token}"),
             "balance": self.faucet,
             "created": _now(), "seen": _now(),
-            "spent": 0.0, "asks": 0,
+            "spent": 0.0, "asks": 0, "banned": False,
             "log": [], "history": [],
             "live": "", "busy": False, "last_ask": 0.0,
         }
@@ -176,6 +187,8 @@ class WebApp:
 
     def submit_ask(self, token: str, message: str) -> dict[str, Any]:
         guest = self._require_guest(token)
+        if guest.get("banned"):
+            raise PermissionError("this guest has been banned by the harbor keeper")
         message = str(message or "").strip()
         if not message or len(message) > MAX_MESSAGE:
             raise ValueError(f"message must be 1-{MAX_MESSAGE} characters")
@@ -197,6 +210,7 @@ class WebApp:
         def on_token(token_text: str) -> None:
             guest["live"] += token_text
 
+        started = _now()
         try:
             async with self._chat_slots:
                 history = [tuple(x) for x in guest["history"]]
@@ -212,8 +226,15 @@ class WebApp:
                 "cost": spent, "ship": ship_name(provider),
                 "model": served_model,
             })
+            self._asks.append({"ts": round(_now(), 1), "cost": spent,
+                               "ship": ship_name(provider), "model": served_model,
+                               "guest": guest["name"], "ok": True,
+                               "dur": round(_now() - started, 2)})
         except JobError as exc:
             guest["log"].append({"role": "error", "text": str(exc), "ts": _now()})
+            self._asks.append({"ts": round(_now(), 1), "cost": 0.0, "ship": "",
+                               "model": "", "guest": guest["name"], "ok": False,
+                               "dur": round(_now() - started, 2)})
         except Exception as exc:
             log.exception("harbor ask crashed")
             guest["log"].append({"role": "error",
@@ -236,6 +257,122 @@ class WebApp:
             "log": guest["log"][-30:],
             "fleet": self._fleet_summary(),
         }
+
+    # -- the harbor keeper's panel -------------------------------------------
+
+    def _check_admin(self, key: str) -> None:
+        if not hmac.compare_digest(str(key or ""), self.admin_key):
+            raise PermissionError("invalid admin key")
+
+    def admin_state(self) -> dict[str, Any]:
+        """Everything the keeper's panel shows, in scan order: alerts and
+        headline tiles first, then economy, guests and fleet quality."""
+        node = self.node
+        now = _now()
+        balance = node.ledger.balance(node.identity.node_id)
+        asks = list(self._asks)
+        day = [a for a in asks if now - a["ts"] < 24 * 3600]
+        day_ok = [a for a in day if a["ok"]]
+        spent_day = round(sum(a["cost"] for a in day_ok), 4)
+        avg_cost = round(spent_day / len(day_ok), 4) if day_ok else None
+        runway = int(balance / avg_cost) if avg_cost else None
+        active_guests = sum(1 for g in self._guests.values()
+                            if now - g["seen"] < 24 * 3600)
+        flagged = node.ledger.double_spenders()
+
+        alerts: list[dict[str, str]] = []
+        if not self._providers_cache:
+            alerts.append({"level": "critical",
+                           "text": "Filoda sağlayıcı görünmüyor — sorular cevapsız kalır."})
+        if runway is not None and runway < 25:
+            alerts.append({"level": "warning",
+                           "text": f"Bakiye yaklaşık {runway} soruluk — kredi kazanmak için "
+                                   "--provide açın ya da faucet'i kısın."})
+        if flagged:
+            alerts.append({"level": "serious",
+                           "text": f"{len(flagged)} hesap çifte harcamadan işaretli."})
+        if day and (sum(1 for a in day if not a["ok"]) / len(day)) > 0.2:
+            alerts.append({"level": "warning",
+                           "text": "Son 24 saatte soruların %20'sinden fazlası cevapsız."})
+
+        # hourly spend, oldest→newest, 24 buckets (the economy chart's series)
+        buckets = [{"h": h, "spend": 0.0, "asks": 0} for h in range(24)]
+        for a in day_ok:
+            b = buckets[23 - min(23, int((now - a["ts"]) // 3600))]
+            b["spend"] = round(b["spend"] + a["cost"], 4)
+            b["asks"] += 1
+
+        rep = node.reputation.snapshot()
+        fleet = []
+        for p in self._providers_cache:
+            r = rep.get(p["node_id"], {})
+            fleet.append({
+                "ship": ship_name(p["node_id"]),
+                "model": p.get("model") or "—",
+                "price": p["price"],
+                "score": r.get("score"),
+                "good": int(r.get("good", 0)),
+                "bad": int(r.get("bad", 0)),
+                "stream": bool(p.get("stream")),
+            })
+        fleet.sort(key=lambda f: (-(f["score"] or 0), f["price"]))
+
+        guests = [{
+            "token": g["token"], "name": g["name"],
+            "balance": round(g["balance"], 2), "spent": round(g["spent"], 2),
+            "asks": g["asks"], "banned": g["banned"],
+            "seen": round(now - g["seen"]),
+        } for g in sorted(self._guests.values(), key=lambda g: -g["seen"])[:200]]
+
+        return {
+            "ship": ship_name(node.identity.node_id),
+            "alerts": alerts,
+            "tiles": {
+                "balance": round(balance, 2),
+                "spent24": spent_day,
+                "asks24": len(day),
+                "failed24": sum(1 for a in day if not a["ok"]),
+                "guests24": active_guests,
+                "guests_total": len(self._guests),
+                "runway": runway,
+                "avg_cost": avg_cost,
+                "faucet": self.faucet,
+                "providers": len(self._providers_cache),
+                "dht": len(node.dht.table),
+            },
+            "series": buckets,
+            "guests": guests,
+            "fleet": fleet,
+            "flagged": [ship_name(n) for n in flagged],
+        }
+
+    def admin_guest_action(self, token: str, action: str,
+                           amount: float = 0.0) -> dict[str, Any]:
+        guest = self._guests.get(token or "")
+        if guest is None:
+            raise ValueError("no such guest")
+        if action == "gift":
+            amount = float(amount)
+            if not 0 < amount <= 1000:
+                raise ValueError("gift must be between 0 and 1000 credits")
+            guest["balance"] = round(guest["balance"] + amount, 6)
+        elif action == "ban":
+            guest["banned"] = True
+        elif action == "unban":
+            guest["banned"] = False
+        else:
+            raise ValueError(f"unknown action: {action!r}")
+        self._save()
+        return {"ok": True, "balance": round(guest["balance"], 2),
+                "banned": guest["banned"]}
+
+    def admin_set_faucet(self, amount: float) -> dict[str, Any]:
+        amount = float(amount)
+        if not 0 <= amount <= 1000:
+            raise ValueError("faucet must be between 0 and 1000 credits")
+        self.faucet = amount
+        self._save()
+        return {"ok": True, "faucet": self.faucet}
 
     # -- HTTP plumbing -------------------------------------------------------
 
@@ -293,6 +430,23 @@ class WebApp:
                 await self._respond(writer, 200, result)
             elif method == "GET" and path == "/api/chat":
                 await self._respond(writer, 200, self.chat_state(token))
+            elif method == "GET" and path == "/admin":
+                await self._respond(writer, 200, _ADMIN,
+                                    content_type="text/html; charset=utf-8")
+            elif method == "GET" and path == "/admin/api/state":
+                self._check_admin(params.get("key", ""))
+                await self._respond(writer, 200, self.admin_state())
+            elif method == "POST" and path == "/admin/api/guest":
+                spec = json.loads(body.decode("utf-8"))
+                self._check_admin(str(spec.get("key") or ""))
+                await self._respond(writer, 200, self.admin_guest_action(
+                    str(spec.get("token") or ""), str(spec.get("action") or ""),
+                    spec.get("amount") or 0.0))
+            elif method == "POST" and path == "/admin/api/faucet":
+                spec = json.loads(body.decode("utf-8"))
+                self._check_admin(str(spec.get("key") or ""))
+                await self._respond(writer, 200,
+                                    self.admin_set_faucet(spec.get("amount")))
             else:
                 await self._respond(writer, 404, {"error": "not found"})
         except PermissionError as exc:
@@ -667,6 +821,306 @@ $('#askform').addEventListener('submit', async ev => {
 applyLang();
 hello().then(poll);
 setInterval(poll, 700);
+</script>
+</body>
+</html>
+"""
+
+
+_ADMIN = r"""<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#060b16">
+<title>Kemi Limanı — kaptan köşkü</title>
+<style>
+  :root {
+    --sea-deep:#060b16; --sea:#0b1424; --hull:#101c31; --hull-2:#0e1930;
+    --edge:#1d2c47; --edge-soft:#16233c;
+    --foam:#e9eef7; --mist:#97a3be; --faint:#5f6d8c;
+    --brass:#e7b75f; --brass-deep:#c9954a; --phosphor:#57d9c0;
+    --good:#57d9c0; --warn:#f0a64a; --crit:#f27d8a;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  * { box-sizing:border-box; margin:0; }
+  body { background:radial-gradient(80rem 36rem at 50% -14rem, #162543 0%, transparent 60%),
+         var(--sea-deep); color:var(--foam); font:14px/1.5 var(--sans);
+         min-height:100dvh; }
+  header { display:flex; align-items:baseline; gap:12px; padding:14px 22px;
+    border-bottom:1px solid var(--edge-soft); position:sticky; top:0; z-index:5;
+    background:color-mix(in srgb, var(--sea-deep) 84%, transparent);
+    backdrop-filter:blur(10px); }
+  header .word { font:600 21px/1 var(--serif); }
+  header .sub { font:11px var(--mono); color:var(--faint);
+    letter-spacing:.2em; text-transform:uppercase; }
+  header .ship { margin-left:auto; font:12px var(--mono); color:var(--mist); }
+  main { max-width:1180px; margin:0 auto; padding:18px 22px 60px;
+    display:flex; flex-direction:column; gap:16px; }
+  .gate { max-width:420px; margin:12dvh auto; background:var(--hull);
+    border:1px solid var(--edge); border-radius:16px; padding:26px; }
+  .gate h1 { font:600 20px var(--serif); margin-bottom:8px; }
+  .gate p { color:var(--mist); font-size:13px; margin-bottom:14px; }
+  .gate .row { display:flex; gap:8px; }
+  .gate input { flex:1; }
+  section { background:linear-gradient(170deg, var(--hull), var(--hull-2));
+    border:1px solid var(--edge-soft); border-radius:14px; padding:16px 18px;
+    overflow-x:auto; }
+  h2 { font-size:11px; text-transform:uppercase; letter-spacing:.16em;
+    color:var(--faint); margin-bottom:12px; }
+  .alerts { display:flex; flex-direction:column; gap:8px; }
+  .alert { display:flex; gap:10px; align-items:center; border-radius:10px;
+    padding:10px 14px; font-size:13.5px; border:1px solid; }
+  .alert.warning { color:var(--warn); border-color:rgba(240,166,74,.35);
+    background:rgba(240,166,74,.07); }
+  .alert.serious, .alert.critical { color:var(--crit);
+    border-color:rgba(242,125,138,.35); background:rgba(242,125,138,.07); }
+  .alert.okay { color:var(--good); border-color:rgba(87,217,192,.3);
+    background:rgba(87,217,192,.06); }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    gap:10px; }
+  .tile { border:1px solid var(--edge-soft); background:rgba(14,25,48,.5);
+    border-radius:12px; padding:12px 15px; }
+  .tile .n { font:600 22px/1.2 var(--mono); font-variant-numeric:tabular-nums; }
+  .tile .n small { font-size:12px; color:var(--faint); font-weight:400; }
+  .tile .l { font-size:10.5px; color:var(--faint); letter-spacing:.12em;
+    text-transform:uppercase; margin-top:4px; }
+  .tile .n.gold { color:var(--brass); } .tile .n.live { color:var(--phosphor); }
+  .tile .n.bad { color:var(--crit); }
+  .chartwrap { position:relative; }
+  #chart { width:100%; height:190px; display:block; }
+  #tip { position:absolute; pointer-events:none; display:none;
+    background:var(--sea-deep); border:1px solid var(--edge); border-radius:8px;
+    padding:6px 10px; font:11.5px var(--mono); color:var(--foam);
+    white-space:nowrap; z-index:3; }
+  table { width:100%; border-collapse:collapse; font-size:13px;
+    font-variant-numeric:tabular-nums; }
+  th { text-align:left; color:var(--faint); font-weight:normal; font-size:10.5px;
+    text-transform:uppercase; letter-spacing:.1em;
+    border-bottom:1px solid var(--edge); padding:3px 10px 6px 0; }
+  td { padding:6px 10px 6px 0; border-bottom:1px solid var(--edge-soft); }
+  tr:last-child td { border-bottom:none; }
+  td.num { font-family:var(--mono); }
+  .pill { display:inline-flex; align-items:center; gap:5px;
+    border:1px solid var(--edge); border-radius:999px; padding:1px 9px;
+    font-size:11px; color:var(--mist); white-space:nowrap; }
+  .pill.good { color:var(--good); border-color:rgba(87,217,192,.4); }
+  .pill.bad { color:var(--crit); border-color:rgba(242,125,138,.4); }
+  .pill.warn { color:var(--warn); border-color:rgba(240,166,74,.4); }
+  button { background:linear-gradient(160deg, var(--brass), var(--brass-deep));
+    color:#221604; border:0; border-radius:9px; padding:7px 12px;
+    font:600 13px var(--sans); cursor:pointer; }
+  button:hover { filter:brightness(1.08); }
+  button.ghost { background:transparent; border:1px solid var(--edge);
+    color:var(--mist); font-weight:400; padding:3px 10px; font-size:12px; }
+  button.ghost:hover { border-color:var(--crit); color:var(--crit); }
+  button.ghost.ok:hover { border-color:var(--good); color:var(--good); }
+  input { background:rgba(10,17,32,.7); color:var(--foam);
+    border:1px solid var(--edge); border-radius:9px; padding:8px 10px;
+    font:14px var(--mono); }
+  input:focus { outline:none; border-color:var(--phosphor); }
+  .faucetrow { display:flex; gap:8px; align-items:center; margin-top:10px;
+    color:var(--mist); font-size:13px; }
+  .faucetrow input { width:90px; }
+  :focus-visible { outline:2px solid var(--phosphor); outline-offset:2px; }
+  .muted { color:var(--faint); }
+  @media (max-width:640px) { main { padding:12px 12px 40px; } th,td { font-size:12px; } }
+</style>
+</head>
+<body>
+<header>
+  <span class="word">Kemi</span>
+  <span class="sub">kaptan köşkü</span>
+  <span class="ship" id="shipname"></span>
+</header>
+<main id="app">
+  <div class="gate" id="gate">
+    <h1>⚓ Kaptan köşkü</h1>
+    <p>Bu panel limanın sahibine aittir. <code>kemi web</code> başlarken
+       terminalde yazan yönetici anahtarını girin.</p>
+    <div class="row">
+      <input id="keyinput" placeholder="yönetici anahtarı" aria-label="admin key">
+      <button id="keybtn">giriş</button>
+    </div>
+  </div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const esc = t => String(t).replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let KEY = localStorage.getItem('kemi-admin-key') || '';
+const ICONS = { warning:'▲', serious:'✖', critical:'✖', okay:'●' };
+const ago = s => s < 90 ? `${s} sn` : s < 5400 ? `${Math.round(s/60)} dk`
+                : s < 129600 ? `${Math.round(s/3600)} sa` : `${Math.round(s/86400)} g`;
+
+function gate() {
+  $('#app').innerHTML = document.getElementById('gate')
+    ? $('#app').innerHTML : '';
+}
+$('#keybtn') && ($('#keybtn').onclick = () => {
+  KEY = $('#keyinput').value.trim();
+  localStorage.setItem('kemi-admin-key', KEY);
+  refresh();
+});
+
+function tiles(t) {
+  const cell = (n, l, cls='', extra='') =>
+    `<div class="tile"><div class="n ${cls}">${n}${extra}</div><div class="l">${l}</div></div>`;
+  return `<section><h2>komuta özeti</h2><div class="tiles">` +
+    cell(t.balance.toFixed(2), 'liman bakiyesi (kredi)', 'gold') +
+    cell(t.spent24.toFixed(2), 'filoya ödenen · 24 sa', 'gold') +
+    cell(t.asks24 + (t.failed24 ? ` <small>(${t.failed24} cevapsız)</small>` : ''),
+         'soru · 24 sa', t.failed24 > 0 ? 'bad' : '') +
+    cell(t.guests24 + ` <small>/ ${t.guests_total}</small>`, 'aktif ziyaretçi · 24 sa', 'live') +
+    cell(t.runway != null ? '≈' + t.runway : '—', 'kalan soru (tahmin)',
+         t.runway != null && t.runway < 25 ? 'bad' : '') +
+    cell(t.providers, 'gemi çevrimiçi', t.providers ? 'live' : 'bad') +
+    `</div><div class="faucetrow">hoş geldin kredisi (faucet):
+      <input id="faucet" type="number" min="0" max="1000" step="0.5" value="${t.faucet}">
+      <button id="faucetbtn">kaydet</button>
+      <span class="muted">yeni ziyaretçilere verilir · DHT: ${t.dht} bağlantı</span>
+    </div></section>`;
+}
+
+function alerts(list) {
+  if (!list.length)
+    list = [{level:'okay', text:'Her şey yolunda — liman sakin, filo cevap veriyor.'}];
+  return `<section><h2>durum</h2><div class="alerts">` + list.map(a =>
+    `<div class="alert ${a.level}"><span>${ICONS[a.level] || '●'}</span>` +
+    `<span>${esc(a.text)}</span></div>`).join('') + `</div></section>`;
+}
+
+function chart(series) {
+  const W = 1100, H = 190, P = {l:44, r:10, t:14, b:22};
+  const iw = W - P.l - P.r, ih = H - P.t - P.b;
+  const max = Math.max(0.001, ...series.map(b => b.spend));
+  const bw = iw / 24;
+  const y = v => P.t + ih - (v / max) * ih;
+  const grid = [0, .5, 1].map(f => {
+    const v = max * f, yy = y(v);
+    return `<line x1="${P.l}" x2="${W-P.r}" y1="${yy}" y2="${yy}"
+              stroke="#1d2c47" stroke-width="1"/>
+            <text x="${P.l-8}" y="${yy+4}" text-anchor="end"
+              font-size="10" fill="#5f6d8c" font-family="ui-monospace,Menlo">${v.toFixed(1)}</text>`;
+  }).join('');
+  const bars = series.map((b, i) => {
+    const x = P.l + i * bw + 2, w = Math.max(2, bw - 4);
+    const h = Math.max(b.spend > 0 ? 3 : 0, (b.spend / max) * ih);
+    return `<rect class="bar" data-i="${i}" x="${x}" y="${y(0)-h}" width="${w}" height="${h}"
+              rx="3" fill="#e7b75f"/>
+            <rect class="hit" data-i="${i}" x="${P.l + i*bw}" y="${P.t}" width="${bw}"
+              height="${ih}" fill="transparent"/>`;
+  }).join('');
+  const now = new Date();
+  const labels = [23, 17, 11, 5, 0].map(back => {
+    const d = new Date(now.getTime() - back * 3600e3);
+    const i = 23 - back;
+    return `<text x="${P.l + i*bw + bw/2}" y="${H-6}" text-anchor="middle"
+              font-size="10" fill="#5f6d8c" font-family="ui-monospace,Menlo"
+              >${String(d.getHours()).padStart(2,'0')}:00</text>`;
+  }).join('');
+  return `<section><h2>ekonomi — saatlik filo ödemesi (kredi, son 24 sa)</h2>
+    <div class="chartwrap">
+      <svg id="chart" viewBox="0 0 ${W} ${H}" role="img"
+        aria-label="saatlik harcama grafiği">${grid}${bars}${labels}</svg>
+      <div id="tip"></div>
+    </div></section>`;
+}
+
+function guests(rows) {
+  const body = rows.length ? rows.map(g => `<tr>
+    <td>⚓ ${esc(g.name)} ${g.banned ? '<span class="pill bad">✖ engelli</span>' : ''}</td>
+    <td class="num">${g.balance.toFixed(2)}</td>
+    <td class="num">${g.spent.toFixed(2)}</td>
+    <td class="num">${g.asks}</td>
+    <td class="muted">${ago(g.seen)} önce</td>
+    <td style="white-space:nowrap">
+      <button class="ghost ok" data-act="gift" data-t="${esc(g.token)}">+5 kredi</button>
+      <button class="ghost" data-act="${g.banned ? 'unban' : 'ban'}"
+        data-t="${esc(g.token)}">${g.banned ? 'engeli kaldır' : 'engelle'}</button>
+    </td></tr>`).join('')
+    : `<tr><td colspan="6" class="muted">henüz ziyaretçi yok — liman adresini paylaşın</td></tr>`;
+  return `<section><h2>ziyaretçiler</h2><table>
+    <thead><tr><th>misafir</th><th>bakiye</th><th>harcadı</th><th>soru</th>
+    <th>son görülme</th><th>eylem</th></tr></thead>
+    <tbody>${body}</tbody></table></section>`;
+}
+
+function fleet(rows, flagged) {
+  const body = rows.length ? rows.map(f => `<tr>
+    <td>⚓ ${esc(f.ship)}</td>
+    <td>${f.model !== 'mock' && f.model !== '—'
+          ? `<span class="pill good">● ${esc(f.model)}</span>`
+          : `<span class="pill">○ ${esc(f.model)}</span>`}</td>
+    <td class="num">${f.price.toFixed(2)}</td>
+    <td class="num">${f.score != null ? f.score.toFixed(2) : '—'}</td>
+    <td class="num">${f.good} <span class="muted">/</span> ${f.bad}</td>
+    <td>${f.stream ? '<span class="pill good">● akış</span>'
+                   : '<span class="pill warn">▲ akış yok</span>'}</td></tr>`).join('')
+    : `<tr><td colspan="6" class="muted">filo boş görünüyor</td></tr>`;
+  const flagRow = flagged.length
+    ? `<p style="margin-top:10px" class="muted">✖ işaretli hesaplar: ${flagged.map(esc).join(', ')}</p>` : '';
+  return `<section><h2>filo kalitesi</h2><table>
+    <thead><tr><th>gemi</th><th>model</th><th>kredi/soru</th><th>itibar</th>
+    <th>iyi / kötü</th><th>yetenek</th></tr></thead>
+    <tbody>${body}</tbody></table>${flagRow}</section>`;
+}
+
+let STATE = null;
+function render() {
+  const s = STATE;
+  $('#shipname').textContent = '⚓ ' + s.ship;
+  $('#app').innerHTML = alerts(s.alerts) + tiles(s.tiles) + chart(s.series) +
+                        guests(s.guests) + fleet(s.fleet, s.flagged);
+  $('#faucetbtn').onclick = async () => {
+    await post('/admin/api/faucet', { amount: parseFloat($('#faucet').value) });
+    refresh();
+  };
+  document.querySelectorAll('button.ghost').forEach(b => b.onclick = async () => {
+    const body = { token: b.dataset.t, action: b.dataset.act };
+    if (b.dataset.act === 'gift') body.amount = 5;
+    await post('/admin/api/guest', body);
+    refresh();
+  });
+  const tip = $('#tip'), svg = $('#chart');
+  svg.addEventListener('mousemove', ev => {
+    const t = ev.target.closest('[data-i]');
+    if (!t) { tip.style.display = 'none'; return; }
+    const b = STATE.series[+t.dataset.i];
+    const back = 23 - (+t.dataset.i);
+    const d = new Date(Date.now() - back * 3600e3);
+    tip.textContent = `${String(d.getHours()).padStart(2,'0')}:00 — ` +
+      `${b.spend.toFixed(2)} kr · ${b.asks} soru`;
+    const r = svg.getBoundingClientRect();
+    tip.style.display = 'block';
+    tip.style.left = Math.max(0, Math.min(ev.clientX - r.left + 12, r.width - 190)) + 'px';
+    tip.style.top = (ev.clientY - r.top - 34) + 'px';
+  });
+  svg.addEventListener('mouseleave', () => tip.style.display = 'none');
+}
+
+async function post(url, body) {
+  body.key = KEY;
+  const r = await fetch(url, { method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  if (!r.ok) { const j = await r.json().catch(() => ({}));
+               alert(j.error || 'hata'); }
+  return r;
+}
+
+async function refresh() {
+  if (!KEY) return;
+  try {
+    const r = await fetch('/admin/api/state?key=' + encodeURIComponent(KEY));
+    if (r.status === 401) { localStorage.removeItem('kemi-admin-key'); return; }
+    STATE = await r.json();
+    render();
+  } catch (e) {}
+}
+if (KEY) refresh();
+setInterval(refresh, 3000);
 </script>
 </body>
 </html>

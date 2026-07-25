@@ -146,5 +146,103 @@ class HarborTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["log"][-1]["role"], "fleet")
 
 
+class KeeperPanelTests(unittest.IsolatedAsyncioTestCase):
+    """The /admin keeper's panel: key-gated harbor operations."""
+
+    async def asyncSetUp(self):
+        self.nodes: list[PeerNode] = []
+        self.bootstrap = await self._spawn()
+        self.peers = [("127.0.0.1", self.bootstrap.port)]
+        await self._spawn(provide=True, price=0.5)
+        self.host_node = await self._spawn()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.app = WebApp(self.host_node, host="127.0.0.1", port=0, faucet=5.0,
+                          state_path=os.path.join(self.tmp.name, "harbor.json"),
+                          admin_key="test-key")
+        await self.app.start()
+        self.base = f"http://127.0.0.1:{self.app.port}"
+
+    async def asyncTearDown(self):
+        await self.app.stop()
+        for node in self.nodes:
+            await node.stop()
+        self.tmp.cleanup()
+
+    async def _spawn(self, **kwargs) -> PeerNode:
+        node = PeerNode(Identity.create(difficulty=DIFF), host="127.0.0.1", port=0,
+                        bootstrap=getattr(self, "peers", None) or [],
+                        difficulty=DIFF, sandbox=False, **kwargs)
+        await node.start()
+        self.nodes.append(node)
+        return node
+
+    async def test_admin_state_requires_the_key(self):
+        try:
+            status, _ = await asyncio.to_thread(
+                _get, self.base + "/admin/api/state?key=wrong")
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+        self.assertEqual(status, 401)
+        status, state = await asyncio.to_thread(
+            _get, self.base + "/admin/api/state?key=test-key")
+        self.assertEqual(status, 200)
+        for section in ("alerts", "tiles", "series", "guests", "fleet"):
+            self.assertIn(section, state)
+        self.assertEqual(len(state["series"]), 24)
+        self.assertEqual(state["tiles"]["faucet"], 5.0)
+
+    async def test_asks_show_up_in_economy_and_guest_rows(self):
+        _, guest = await asyncio.to_thread(_post, self.base + "/api/hello", {})
+        await asyncio.to_thread(_post, self.base + "/api/ask",
+                                {"token": guest["token"], "message": "selam"})
+        for _ in range(60):
+            _, chat = await asyncio.to_thread(
+                _get, self.base + "/api/chat?t=" + guest["token"])
+            if not chat["busy"]:
+                break
+            await asyncio.sleep(0.2)
+        _, state = await asyncio.to_thread(
+            _get, self.base + "/admin/api/state?key=test-key")
+        self.assertEqual(state["tiles"]["asks24"], 1)
+        self.assertEqual(state["tiles"]["spent24"], 0.5)
+        self.assertEqual(sum(b["spend"] for b in state["series"]), 0.5)
+        row = state["guests"][0]
+        self.assertEqual(row["name"], guest["name"])
+        self.assertEqual(row["spent"], 0.5)
+
+    async def test_gift_ban_and_faucet_actions(self):
+        _, guest = await asyncio.to_thread(_post, self.base + "/api/hello", {})
+        _, r = await asyncio.to_thread(_post, self.base + "/admin/api/guest",
+                                       {"key": "test-key", "token": guest["token"],
+                                        "action": "gift", "amount": 5})
+        self.assertEqual(r["balance"], 10.0)
+        _, r = await asyncio.to_thread(_post, self.base + "/admin/api/guest",
+                                       {"key": "test-key", "token": guest["token"],
+                                        "action": "ban"})
+        self.assertTrue(r["banned"])
+        try:
+            status, body = await asyncio.to_thread(
+                _post, self.base + "/api/ask",
+                {"token": guest["token"], "message": "hi"})
+        except urllib.error.HTTPError as exc:
+            status, body = exc.code, json.loads(exc.read())
+        self.assertEqual(status, 401)
+        self.assertIn("banned", body["error"])
+        _, r = await asyncio.to_thread(_post, self.base + "/admin/api/faucet",
+                                       {"key": "test-key", "amount": 2.5})
+        self.assertEqual(r["faucet"], 2.5)
+        _, fresh = await asyncio.to_thread(_post, self.base + "/api/hello", {})
+        self.assertEqual(fresh["balance"], 2.5)
+
+    async def test_admin_actions_reject_a_bad_key(self):
+        try:
+            status, _ = await asyncio.to_thread(
+                _post, self.base + "/admin/api/faucet",
+                {"key": "wrong", "amount": 1})
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+        self.assertEqual(status, 401)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.10.0 — The keeper's panel (harbor admin)
+- `/admin` on every harbor: a key-gated keeper's panel (key printed at
+  `kemi web` start, or set with `--admin-key`), designed in scan order —
+  status alerts first, then headline tiles (balance, 24h fleet spend,
+  questions, active guests, estimated questions remaining, ships online),
+  then the hourly-spend economy chart, the guest ledger and fleet quality.
+- Guest operations that act immediately: gift credits, ban/unban (a banned
+  guest is refused mid-session with an honest message), and a live faucet
+  editor — all persisted to `harbor.json` along with the ask records the
+  economy chart is built from.
+- Alert engine encodes state, not decoration: no providers → critical,
+  balance below ~25 questions → warning, flagged double-spenders → serious,
+  >20% unanswered in 24h → warning; every alert ships icon + label, never
+  color alone (the palette validator caught the classic red/green CVD trap
+  and the status colors were fixed accordingly).
+- Fleet quality table joins live provider records with the reputation
+  book: model (real vs mock pill), price, score, good/bad counts,
+  streaming capability. Chart follows the dataviz rules: single hue,
+  single axis, hover tooltips, recessive grid, tabular numerals.
+- Deliberately NOT in the admin panel: brain/voice/node-health segments —
+  those are ship captaincy and live in the `kemi app` dashboard; the
+  keeper's panel runs the harbor. Admin auth uses constant-time key
+  comparison; admin URL and key are printed at startup.
+
 ## 1.9.1 — The night-sea identity (UI/UX facelift)
 - The harbor got a designed visual identity instead of a generic dark
   theme: a "night sea" world — deep navy grounds, brass (credits/ledger)

@@ -314,10 +314,13 @@ async def _cmd_web(args: argparse.Namespace) -> int:
     await node.start()
     state_path = os.path.join(KEMI_HOME, "harbor.json")
     app = WebApp(node, host=args.web_host, port=args.web_port,
-                 faucet=args.faucet, state_path=state_path)
+                 faucet=args.faucet, state_path=state_path,
+                 admin_key=args.admin_key)
     await app.start()
     print(BANNER)
     print(f"⚓ Harbor open: http://{args.web_host}:{app.port}/")
+    print(f"  Keeper's panel: http://{args.web_host}:{app.port}/admin")
+    print(f"  Admin key (keep it secret): {app.admin_key}")
     print(f"  Visitors get {args.faucet:g} welcome credits; their questions are")
     print("  answered by ships in the fleet and paid from this node's balance.")
     print(f"  This node's balance: "
@@ -733,6 +736,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=0, help="this node's p2p port")
     p.add_argument("--faucet", type=float, default=10.0,
                    help="welcome credits per new visitor (paid by this node)")
+    p.add_argument("--admin-key", default=None,
+                   help="keeper's panel key (default: generated and printed)")
     p.add_argument("--provide", action="store_true",
                    help="also share this machine's compute with the fleet")
     p.add_argument("--price", type=float, default=1.0)
