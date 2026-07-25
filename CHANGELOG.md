@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.0 — The harbor: Kemi as a web app
+- `kemi web` (alias `liman`) opens a public harbor: a mobile-first web app
+  where anyone chats with the fleet from a browser — no install, no
+  account. Visitors get a welcome-credit guest wallet (host-configurable
+  `--faucet`), their questions are answered by ships in the fleet, and
+  every reply is stamped `⚓ credits · ship · model` as visible proof the
+  answer came from another user's machine, not a central server.
+- The harbor host's node pays providers on the real ledger and meters each
+  guest wallet by exactly what their questions cost; broke guests are
+  pointed at `pip install kemi && kemi app` to join the fleet with their
+  own ship. Anyone can open their own harbor — decentralisation lives one
+  level up.
+- Guest wallets and chat history persist in `$KEMI_HOME/harbor.json`
+  across harbor restarts. Per-guest cooldowns, message caps, idle-guest
+  eviction and a harbor-wide concurrency cap keep one visitor from
+  draining the host. Turkish/English UI.
+- LAUNCH.md gained a "web uygulaması" go-live section.
+
 ## 1.8.1 — Streaming payments made airtight
 Found by an adversarial multi-agent review of 1.8.0; all three confirmed
 findings fixed:

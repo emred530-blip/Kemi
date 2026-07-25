@@ -305,6 +305,35 @@ async def _cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _cmd_web(args: argparse.Namespace) -> int:
+    """Open a public harbor: a web app where visitors chat with the fleet."""
+    from .webapp import WebApp
+
+    node = _make_node(args, host="0.0.0.0", port=args.port,
+                      provide=args.provide, price=args.price)
+    await node.start()
+    state_path = os.path.join(KEMI_HOME, "harbor.json")
+    app = WebApp(node, host=args.web_host, port=args.web_port,
+                 faucet=args.faucet, state_path=state_path)
+    await app.start()
+    print(BANNER)
+    print(f"⚓ Harbor open: http://{args.web_host}:{app.port}/")
+    print(f"  Visitors get {args.faucet:g} welcome credits; their questions are")
+    print("  answered by ships in the fleet and paid from this node's balance.")
+    print(f"  This node's balance: "
+          f"{node.ledger.balance(node.identity.node_id):.2f} credits"
+          + (" (also providing compute)" if args.provide else ""))
+    print("  Ctrl+C to close the harbor.")
+    try:
+        await node.serve_forever()
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await app.stop()
+        await node.stop()
+    return 0
+
+
 async def _cmd_search(args: argparse.Namespace) -> int:
     """RAG over the fleet: rank documents (one per non-empty line) against a
     query by embedding both and cosine-ranking — all on the swarm."""
@@ -692,6 +721,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ledger", default=DEFAULT_LEDGER_PATH)
     p.add_argument("--reputation", default=DEFAULT_REPUTATION_PATH)
     p.set_defaults(func=_cmd_serve)
+
+    p = sub.add_parser("web", aliases=["liman"],
+                       help="open a public harbor: a web app where visitors "
+                            "chat with the fleet from any browser")
+    p.add_argument("--peer", type=_parse_endpoint, action="append", default=[],
+                   metavar="HOST:PORT", help="fleet peer(s) to join (optional "
+                   "when other ships are on this LAN)")
+    p.add_argument("--web-host", default="0.0.0.0", help="harbor bind address")
+    p.add_argument("--web-port", type=int, default=8090, help="harbor port")
+    p.add_argument("--port", type=int, default=0, help="this node's p2p port")
+    p.add_argument("--faucet", type=float, default=10.0,
+                   help="welcome credits per new visitor (paid by this node)")
+    p.add_argument("--provide", action="store_true",
+                   help="also share this machine's compute with the fleet")
+    p.add_argument("--price", type=float, default=1.0)
+    p.add_argument("--identity", default=DEFAULT_IDENTITY_PATH)
+    p.add_argument("--ledger", default=DEFAULT_LEDGER_PATH)
+    p.add_argument("--reputation", default=DEFAULT_REPUTATION_PATH)
+    p.set_defaults(func=_cmd_web)
 
     p = sub.add_parser("search", aliases=["ara"],
                        help="RAG: rank documents against a query over the fleet")

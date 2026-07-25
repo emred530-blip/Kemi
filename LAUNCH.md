@@ -68,7 +68,30 @@ olması yeterlidir (BitTorrent'teki ilk peer gibi; özel bir rolü yoktur):
 Ağ büyüdükçe hiçbir düğüm vazgeçilmez değildir: DHT ve dedikodu defteri
 sayesinde liman düğümü kapansa bile filo yaşamaya devam eder.
 
-## 5. Yayınlama (isteğe bağlı)
+## 5. Web uygulaması — herkese açık sohbet limanı
+
+İnsanların **hiçbir şey kurmadan** tarayıcıdan filoyla yazışması için:
+
+```bash
+# Filoya bağlı bir liman aç (ziyaretçi başına 10 karşılama kredisi):
+kemi web --peer SUNUCU_IP:7700 --web-port 8090 --faucet 10
+
+# Liman makinesi aynı zamanda compute de paylaşsın:
+kemi web --peer SUNUCU_IP:7700 --provide --price 1.0
+```
+
+Ziyaretçi `http://SUNUCU_IP:8090/` adresini açar, kendine özel bir misafir
+cüzdanı ve karşılama kredisi alır, sorusunu yazar. Cevap **merkezî bir
+sunucudan değil**, filodaki gemilerden gelir ve altında damgası vardır:
+`⚓ 1.50 kredi · silent-coral-14 · llama3.2`. Kredisi biten ziyaretçiye
+kendi gemisini katması önerilir (`pip install kemi && kemi app`) — büyüme
+döngüsü budur. Bir liman özel değildir: `kemi web` çalıştıran herkes
+kendi limanını açabilir; harcamaları o limanın düğümü karşılar.
+
+Kalıcılık: misafir cüzdanları `~/.kemi/harbor.json` dosyasında saklanır;
+liman yeniden başlasa da bakiye ve sohbet geçmişi korunur.
+
+## 6. Yayınlama (isteğe bağlı)
 
 - **GitHub:** `claude/p2p-compute-sharing-wnbm1l` dalını `main`'e birleştirip
   depoyu herkese açık yapın.
