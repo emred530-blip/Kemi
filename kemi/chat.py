@@ -1,10 +1,10 @@
-"""``kemi chat``: a conversational REPL with the fleet's AI.
+"""``kemi chat``: a conversational REPL against the network's AI.
 
-Each reply streams in live from the cheapest reputable provider, end-to-end
-encrypted, and is paid for with a signed micro-transfer. Conversation
-history is kept locally and prepended to each prompt so models with real
-context (e.g. via the Ollama backend) can hold a conversation; the fleet
-itself stays stateless.
+Each reply streams in live from the cheapest reputable provider node,
+end-to-end encrypted, and is paid for with a signed micro-transfer.
+Conversation history is kept locally and prepended to each prompt so models
+with real context (e.g. via the Ollama backend) can hold a conversation; the
+network itself stays stateless.
 """
 
 from __future__ import annotations
@@ -68,20 +68,20 @@ async def run_chat(consumer: Consumer, *, max_tokens: int = 128,
                  if p.get("stream")]
     if not providers:
         suffix = f" with model {model!r}" if model else ""
-        print(f"no streaming AI providers in this fleet{suffix} "
+        print(f"no streaming AI providers on this network{suffix} "
               "(start one with: kemi node --provide --ai-backend ollama ...)",
               file=sys.stderr)
         return 1
     best = providers[0]
     model_note = f", model {best['model']}" if best.get("model") else ""
-    print(f"⚓ chatting with the fleet - best ship: {ship_name(best['node_id'])} "
+    print(f"Connected to the network — selected node: {ship_name(best['node_id'])} "
           f"({best['price']:.2f} cr/item, e2e encrypted{model_note})")
     print("  commands: /balance  /clear  /quit\n")
 
     history: list[tuple[str, str]] = []
     while True:
         try:
-            user_message = (await asyncio.to_thread(input, "you ⚓ ")).strip()
+            user_message = (await asyncio.to_thread(input, "you > ")).strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return 0
@@ -96,7 +96,7 @@ async def run_chat(consumer: Consumer, *, max_tokens: int = 128,
         if user_message == "/balance":
             print(f"  {await consumer.balance():.2f} credits")
             continue
-        print("fleet > ", end="", flush=True)
+        print("net > ", end="", flush=True)
         try:
             _, spent, provider, _ = await chat_once(
                 consumer, history, user_message, max_tokens=max_tokens,

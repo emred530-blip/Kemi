@@ -118,7 +118,7 @@ async def _cmd_node(args: argparse.Namespace) -> int:
     await node.start()
     role = "provider" if args.provide else "peer"
     name = ship_name(node.identity.node_id)
-    print(f"⚓ ship '{name}' at sea - {role}, port {node.port} (tcp+udp)")
+    print(f"Node '{name}' online — role: {role}, port {node.port} (tcp+udp)")
     print(f"  invite code: {make_invite([(_guess_lan_ip(), node.port)], note=name)}")
     print("  join with:   kemi join --invite CODE   (or on the same network: kemi join)")
     if args.provide:
@@ -163,7 +163,7 @@ async def _cmd_app(args: argparse.Namespace) -> int:
     from .webui import WebUI
 
     print(BANNER)
-    print("  Starting Kemi… your computer is joining the fleet.")
+    print("  Starting Kemi — connecting this machine to the network.")
     node = _make_node(
         args, host="0.0.0.0", port=args.port, provide=not args.watch,
         price=args.price, lan=True,
@@ -178,13 +178,13 @@ async def _cmd_app(args: argparse.Namespace) -> int:
     ui_host = "0.0.0.0" if args.phone else "127.0.0.1"
     ui = WebUI(node, host=ui_host, port=args.ui)
     await ui.start()
-    print(f"\n  ⚓ Your ship '{name}' is sailing.")
-    print(f"  ✦ Open this in your browser:  http://127.0.0.1:{ui.port}/")
+    print(f"\n  Node '{name}' is online.")
+    print(f"  Dashboard:  http://127.0.0.1:{ui.port}/")
     if args.phone:
-        print(f"  ✦ On your phone (same Wi-Fi):  http://{_guess_lan_ip()}:{ui.port}/")
-        print("    then use the browser's “Add to Home Screen” to install the app.")
-    print("  ✦ Everything happens there — chat with the AI, invite friends, watch the fleet.")
-    print("  ✦ Keep this window open. Press Ctrl+C to stop.\n")
+        print(f"  On your phone (same Wi-Fi):  http://{_guess_lan_ip()}:{ui.port}/")
+        print("    use the browser's “Add to Home Screen” to install the app.")
+    print("  From there: query the AI, invite peers and monitor the network.")
+    print("  Keep this window open. Press Ctrl+C to stop.\n")
     try:
         webbrowser.open(ui.url)
     except Exception:
@@ -265,9 +265,9 @@ async def _cmd_wallet(args: argparse.Namespace) -> int:
         me = node.identity.node_id
         earned = node.ledger.total_earned(me)
         title, insignia, nxt = rank_for(earned)
-        print(f"⚓ {ship_name(me)}   {insignia} {title}")
+        print(f"{ship_name(me)}   tier: {insignia} {title}")
         print(f"  balance: {node.ledger.balance(me):.2f} credits   "
-              f"earned: {earned:.2f}" + (f"   next rank at {nxt:.0f}" if nxt else ""))
+              f"earned: {earned:.2f}" + (f"   next tier at {nxt:.0f}" if nxt else ""))
         history = node.ledger.history(me, limit=args.limit)
         if not history:
             print("  no transactions yet")
@@ -289,7 +289,7 @@ async def _cmd_serve(args: argparse.Namespace) -> int:
     await node.start()
     gw = OpenAIGateway(node, host=args.host, port=args.serve_port)
     await gw.start()
-    print(f"⚓ OpenAI-compatible gateway: {gw.base_url}")
+    print(f"OpenAI-compatible gateway: {gw.base_url}")
     print("  Point any OpenAI client at it (no real key needed):")
     print(f"    export OPENAI_BASE_URL={gw.base_url}")
     print("    export OPENAI_API_KEY=kemi")
@@ -306,27 +306,27 @@ async def _cmd_serve(args: argparse.Namespace) -> int:
 
 
 async def _cmd_web(args: argparse.Namespace) -> int:
-    """Open a public harbor: a web app where visitors chat with the fleet."""
+    """Run a public access portal: a web app for querying the network."""
     from .webapp import WebApp
 
     node = _make_node(args, host="0.0.0.0", port=args.port,
                       provide=args.provide, price=args.price)
     await node.start()
-    state_path = os.path.join(KEMI_HOME, "harbor.json")
+    state_path = os.path.join(KEMI_HOME, "portal.json")
     app = WebApp(node, host=args.web_host, port=args.web_port,
                  faucet=args.faucet, state_path=state_path,
                  admin_key=args.admin_key)
     await app.start()
     print(BANNER)
-    print(f"⚓ Harbor open: http://{args.web_host}:{app.port}/")
-    print(f"  Keeper's panel: http://{args.web_host}:{app.port}/admin")
-    print(f"  Admin key (keep it secret): {app.admin_key}")
-    print(f"  Visitors get {args.faucet:g} welcome credits; their questions are")
-    print("  answered by ships in the fleet and paid from this node's balance.")
-    print(f"  This node's balance: "
+    print(f"Access portal:   http://{args.web_host}:{app.port}/")
+    print(f"Operator console: http://{args.web_host}:{app.port}/admin")
+    print(f"Admin key:        {app.admin_key}   (store securely)")
+    print(f"  Each new visitor receives {args.faucet:g} starting credits. Their queries")
+    print("  are processed by provider nodes and settled from this node's balance.")
+    print(f"  Node balance: "
           f"{node.ledger.balance(node.identity.node_id):.2f} credits"
           + (" (also providing compute)" if args.provide else ""))
-    print("  Ctrl+C to close the harbor.")
+    print("  Ctrl+C to stop the portal.")
     try:
         await node.serve_forever()
     except asyncio.CancelledError:
@@ -504,7 +504,7 @@ async def _cmd_status(args: argparse.Namespace) -> int:
 
 async def _cmd_id(args: argparse.Namespace) -> int:
     identity = Identity.load_or_create(args.identity)
-    print(f"ship:     {ship_name(identity.node_id)}")
+    print(f"node:     {ship_name(identity.node_id)}")
     earned = 0.0
     ledger_path = Path(DEFAULT_LEDGER_PATH).expanduser()
     if ledger_path.exists():
@@ -514,8 +514,8 @@ async def _cmd_id(args: argparse.Namespace) -> int:
         earned = ledger.total_earned(identity.node_id)
         ledger.close()
     title, insignia, nxt = rank_for(earned)
-    progress = f" - next rank at {nxt:.0f}" if nxt is not None else ""
-    print(f"rank:     {insignia} {title} ({earned:.2f} credits earned{progress})")
+    progress = f" - next tier at {nxt:.0f}" if nxt is not None else ""
+    print(f"tier:     {insignia} {title} ({earned:.2f} credits earned{progress})")
     print(f"node_id:  {identity.node_id}")
     print(f"pubkey:   {identity.public_key_hex}")
     print(f"pow:      nonce={identity.pow_nonce}")
@@ -526,7 +526,7 @@ async def _cmd_invite(args: argparse.Namespace) -> int:
     code = make_invite(args.peer, note=args.note or "")
     print("Your invite code is ready - safe to share anywhere (contains no secrets):\n")
     print(f"  {code}\n")
-    print("A friend joins your fleet with a single command:")
+    print("Another machine joins your network with a single command:")
     print(f"  kemi join --invite {code[:24]}…")
     return 0
 
@@ -536,7 +536,7 @@ async def _cmd_join(args: argparse.Namespace) -> int:
     print(BANNER)
     identity = Identity.load_or_create(args.identity)
     name = ship_name(identity.node_id)
-    print(f"  Your ship: {name}   (identity {identity.short_id}…)")
+    print(f"  Node name: {name}   (identity {identity.short_id}…)")
 
     peers: list[tuple[str, int]] = list(args.peer or [])
     if args.invite:
@@ -547,16 +547,16 @@ async def _cmd_join(args: argparse.Namespace) -> int:
             return 2
         peers.extend(info["peers"])
         if info["note"]:
-            print(f"  Invited to fleet: '{info['note']}'")
+            print(f"  Invited to network: '{info['note']}'")
     if not peers:
         from . import lan
 
-        print("  Scanning the local network for a fleet (LAN discovery)…")
+        print("  Scanning the local network for peers (LAN discovery)…")
         peers = await lan.discover(identity.node_id, timeout=2.0)
         if peers:
-            print(f"  Found {len(peers)} ship(s) - joining!")
+            print(f"  Found {len(peers)} node(s) - joining.")
         else:
-            print("  No fleet nearby: YOU ARE THE FIRST SHIP. Founding a new fleet…")
+            print("  No peers found nearby - starting a new network as its first node…")
 
     provide = args.share
     if not provide and not args.watch and sys.stdin.isatty():
@@ -572,12 +572,12 @@ async def _cmd_join(args: argparse.Namespace) -> int:
     earned = node.ledger.total_earned(identity.node_id)
     title, insignia, _ = rank_for(earned)
     balance = node.ledger.balance(identity.node_id)
-    print(f"\n  ⚓ '{name}' is at sea! rank: {insignia} {title}, "
-          f"hold: {balance:.2f} credits, port: {node.port}")
+    print(f"\n  Node '{name}' is online — tier: {insignia} {title}, "
+          f"balance: {balance:.2f} credits, port: {node.port}")
     if provide:
-        print(f"  Your compute is for hire: {node.price} credits/item "
+        print(f"  Serving compute at {node.price} credits/item "
               f"({', '.join(node.supported_tasks)})")
-    print(f"  Your invite code: {make_invite([(_guess_lan_ip(), node.port)], note=name)}")
+    print(f"  Invite code: {make_invite([(_guess_lan_ip(), node.port)], note=name)}")
 
     ui = None
     if args.ui:
@@ -644,7 +644,7 @@ async def _cmd_service(args: argparse.Namespace) -> int:
         return 0
     print(f"✓ service unit written to {path}")
     print(f"  activate it with:\n    {hint}")
-    print("  your ship will now rejoin the fleet automatically after reboot.")
+    print("  this node will now rejoin the network automatically after reboot.")
     return 0
 
 
@@ -725,9 +725,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reputation", default=DEFAULT_REPUTATION_PATH)
     p.set_defaults(func=_cmd_serve)
 
-    p = sub.add_parser("web", aliases=["liman"],
-                       help="open a public harbor: a web app where visitors "
-                            "chat with the fleet from any browser")
+    p = sub.add_parser("web", aliases=["portal"],
+                       help="run a public access portal: a web app for querying "
+                            "the network from any browser")
     p.add_argument("--peer", type=_parse_endpoint, action="append", default=[],
                    metavar="HOST:PORT", help="fleet peer(s) to join (optional "
                    "when other ships are on this LAN)")
@@ -735,9 +735,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--web-port", type=int, default=8090, help="harbor port")
     p.add_argument("--port", type=int, default=0, help="this node's p2p port")
     p.add_argument("--faucet", type=float, default=10.0,
-                   help="welcome credits per new visitor (paid by this node)")
+                   help="starting credits per new visitor (funded by this node)")
     p.add_argument("--admin-key", default=None,
-                   help="keeper's panel key (default: generated and printed)")
+                   help="operator console key (default: generated and printed)")
     p.add_argument("--provide", action="store_true",
                    help="also share this machine's compute with the fleet")
     p.add_argument("--price", type=float, default=1.0)
@@ -834,7 +834,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reputation", default=DEFAULT_REPUTATION_PATH)
     p.set_defaults(func=_cmd_app)
 
-    p = sub.add_parser("providers", aliases=["fleet", "filo"], help="list discoverable providers")
+    p = sub.add_parser("providers", aliases=["nodes", "dugumler", "fleet", "filo"],
+                       help="list discoverable provider nodes")
     _add_common(p)
     p.add_argument("--task", default=None, help="only providers offering this task")
     p.set_defaults(func=_cmd_providers)

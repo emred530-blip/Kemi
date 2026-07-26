@@ -142,15 +142,15 @@ every `STREAM_WARMING_INTERVAL` (5 s, e.g. while a model loads). Then
 `{evt:"end",ok,results,charged,end:true}`. Payment is applied *before*
 tokens flow; a consumer that received the receipt but abandons the stream
 (silence past its first-token timeout) must mirror the payment into its own
-ledger replica before hiring the next ship, or its balance check drifts
-optimistic and a failover can overdraw the account. Frames may be
+ledger replica before hiring the next provider node, or its balance check
+drifts optimistic and a failover can overdraw the account. Frames may be
 `enc`-wrapped.
 
 Trust note: the `model` name in a provider record is *self-advertised* and
-unverifiable — a ship can claim `llama3` while serving anything. Consumers
-therefore only use it for tier preference (real-vs-mock) and pinning; quality
-enforcement stays with reputation, redundancy voting and the consumer-side
-brain, all of which act on observed outcomes, not claims.
+unverifiable — a provider node can claim `llama3` while serving anything.
+Consumers therefore only use it for tier preference (real-vs-mock) and
+pinning; quality enforcement stays with reputation, redundancy voting and
+the consumer-side brain, all of which act on observed outcomes, not claims.
 
 ## 9. Relay (NAT traversal)
 

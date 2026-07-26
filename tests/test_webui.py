@@ -50,8 +50,8 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         status, ctype, body = await asyncio.to_thread(_http, "GET", self.base + "/")
         self.assertEqual(status, 200)
         self.assertIn("text/html", ctype)
-        self.assertIn(b"fleet panel", body)
-        self.assertIn(b"Invite a friend", body)   # easy-mode invite button
+        self.assertIn(b"node panel", body)
+        self.assertIn(b"Invite a peer", body)     # easy-mode invite button
         self.assertIn(b'data-tpl="ai"', body)      # job templates (T11)
 
     async def test_prometheus_metrics_endpoint(self):

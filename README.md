@@ -2,19 +2,19 @@
 
 Kemi does for **computing power** what BitTorrent did for files. Anyone can
 rent out their spare CPU/GPU for **credits**; anyone can spend those credits
-to run AI inference or other heavy workloads on the **fleet** — the swarm of
-peers. The goal: make centralised data centres matter less.
+to run AI inference or other heavy workloads on the **network** — the peers
+running Kemi. The goal: make centralised data centres matter less.
 
-> **⚓ The headline: run a model no single machine can hold.** Kemi splits a
-> transformer's layers across many ships — each one holds only its slice, the
-> hidden states between them are end-to-end encrypted, and every shard can be
+> **Run a model no single machine can hold.** Kemi splits a transformer's
+> layers across many nodes — each one holds only its slice, the hidden states
+> between them are end-to-end encrypted, and every shard can be
 > redundancy-verified. A model too big for your laptop runs on three of them.
 > No API key, no account, no token to buy — pay with the compute you share.
 >
 > ```bash
-> kemi shard --peer FRIEND_IP:7700 --prompt "the fleet says" --layers 12
-> # 12-layer model spread over 3 ships: ...:L0-3  ...:L4-7  ...:L8-11
-> # no ship ever held all 12 layers
+> kemi shard --peer PEER_IP:7700 --prompt "distributed inference" --layers 12
+> # 12-layer model spread over 3 nodes: ...:L0-3  ...:L4-7  ...:L8-11
+> # no node ever held all 12 layers
 > ```
 
 **Since v0.2 there is no central component anywhere** — no tracker, no ledger
@@ -24,21 +24,25 @@ embedded live dashboard. **v0.5** real LLM inference via Ollama, live token
 streaming, real workloads and 25-node scale tests. **v0.6** instant
 double-spend *prevention* via witness committees and streaming through
 relays. **v0.7** one-command onboarding, invite codes, LAN auto-discovery,
-ship names and ranks. **v0.8 goes global**: English-first everywhere, with
-Turkish command aliases kept on board. **v0.9 is the usability release**: a
-three-line Python library API, `kemi chat` (a streaming AI REPL), `kemi
-doctor` diagnostics and plain-text job input. **v0.10 is seaworthy**:
-per-IP rate limits and connection caps, ledger checkpointing with fast
-snapshot bootstrap, and chat built into the dashboard. **v0.11** adds a
-multi-model marketplace (`--model`), `ai.embed` for RAG, and a protocol
-fuzzing pass. **v0.12 runs a model no single machine can hold**: a real
-transformer sharded layer-by-layer across the fleet (`kemi shard`),
-redundancy-verified and end-to-end encrypted. **v0.13** adds a no-coding
-`kemi app` mode (auto-opens the dashboard). **v0.14** brings operational
-maturity — result caching, Prometheus metrics, dynamic pricing, a
+node names and contribution tiers. **v0.8** made the project English-first
+everywhere, with the Turkish command aliases retained. **v0.9 is the
+usability release**: a three-line Python library API, `kemi chat` (a
+streaming AI REPL), `kemi doctor` diagnostics and plain-text job input.
+**v0.10 hardens for production**: per-IP rate limits and connection caps,
+ledger checkpointing with fast snapshot bootstrap, and chat built into the
+dashboard. **v0.11** adds a multi-model marketplace (`--model`), `ai.embed`
+for RAG, and a protocol fuzzing pass. **v0.12 runs a model no single machine
+can hold**: a real transformer sharded layer-by-layer across the network
+(`kemi shard`), redundancy-verified and end-to-end encrypted. **v0.13** adds
+a no-coding `kemi app` mode (auto-opens the dashboard). **v0.14** brings
+operational maturity — result caching, Prometheus metrics, dynamic pricing, a
 `kemi service` installer, Docker, and a full protocol spec ([SPEC.md](SPEC.md)).
 **v0.15** adds stake-weighted witnesses, a credit-economy simulation
-(`kemi economy`) and one-click dashboard job templates.
+(`kemi economy`) and one-click dashboard job templates. **v1.x** brings the
+public access portal (`kemi web`) with its operator console, a self-training
+synapse network that ranks providers from observed outcomes, voice commands,
+and — in **v1.11** — the professional terminology used throughout this
+document.
 
 ```
             ╭───────────────  DISCOVERY: Kademlia DHT (UDP)  ───────────────╮
@@ -46,7 +50,7 @@ maturity — result caching, Prometheus metrics, dynamic pricing, a
             │  task key; signed and short-lived                             │
             ╰────────────────────────────────────────────────────────────────╯
    ┌──────────┐      ┌──────────┐      ┌──────────┐      ┌──────────┐
-   │  SHIP A  │◄────►│  SHIP B  │◄────►│  SHIP C  │◄────►│  SHIP D  │
+   │  NODE A  │◄────►│  NODE B  │◄────►│  NODE C  │◄────►│  NODE D  │
    │ provider │      │ consumer │      │ peer +   │◄═════│ (behind  │
    │ 0.5 cr/it│      │          │      │ relay    │ persistent NAT) │
    └────▲─────┘      └────┬─────┘      └──────────┘ conn └──────────┘
@@ -67,7 +71,7 @@ happens in your browser.
 2. **Install Kemi** (once): open Terminal and paste
    `curl -fsSL https://raw.githubusercontent.com/emred530-blip/Kemi/main/scripts/install.sh | sh`
 3. **Start it:** type `kemi app` — a browser window opens with your control
-   panel. Chat with the AI, watch the fleet, and click **“Invite a friend”**
+   panel. Query the AI, monitor the network, and click **“Invite a peer”**
    to copy a code your friends paste to join. That's it.
 
 Prefer double-clicking? The `launchers/` folder has **Kemi-Start.command**
@@ -76,7 +80,7 @@ Prefer double-clicking? The `launchers/` folder has **Kemi-Start.command**
 **On your phone (iOS / Android):** run `kemi app --phone` on a desktop, then
 open the shown `http://<your-ip>:8080/` address in your phone's browser and
 use **Add to Home Screen / Install** — the dashboard installs as an app (a
-PWA) and uses the fleet. See **[PLATFORMS.md](PLATFORMS.md)** for the full
+PWA) and uses the network. See **[PLATFORMS.md](PLATFORMS.md)** for the full
 map of what runs where (Linux/macOS/Windows run full nodes; iOS/Android run
 the client).
 
@@ -98,29 +102,29 @@ pip install -e .            # for fast signatures: pip install -e ".[crypto]"
 kemi join                   # that's it.
 ```
 
-Running a server? `docker compose up` brings up a containerised fleet, and
+Running a server? `docker compose up` brings up a containerised network, and
 `kemi service` installs a systemd/launchd unit so a provider auto-rejoins
 after reboot.
 
-The wizard does the rest: names your ship (derived from your identity, like
-"swift-gull-42"), **auto-discovers a fleet on your Wi-Fi** (LAN discovery),
-makes you the founding ship if there is none, asks whether you want to share
+The wizard does the rest: names your node (derived from your identity, like
+"swift-gull-42"), **auto-discovers a network on your Wi-Fi** (LAN discovery),
+makes you the first node if there is none, asks whether you want to share
 compute, opens the live dashboard and prints the **invite code** you hand to
-friends.
+others.
 
 ```bash
-kemi join --invite kemi1-mfzgc…   # join with a friend's invite code
-kemi invite --peer IP:7700        # mint an invite code for your fleet
-kemi learn                        # 3-minute interactive tour on a live fleet
-kemi chat --peer IP:7700          # talk to the fleet's AI, replies stream live
-kemi shard --peer IP:7700 --prompt "..."   # run a sharded model on the fleet
+kemi join --invite kemi1-mfzgc…   # join with someone else's invite code
+kemi invite --peer IP:7700        # mint an invite code for your network
+kemi learn                        # 3-minute interactive tour on a live network
+kemi chat --peer IP:7700          # talk to the network's AI, replies stream live
+kemi shard --peer IP:7700 --prompt "..."   # run a sharded model on the network
 kemi doctor                       # ✓/✗ readiness report for this machine
 kemi economy                      # simulate the credit economy
 kemi service                      # install an auto-start provider service
-kemi demo --ui 8080               # demo fleet + live dashboard
+kemi demo --ui 8080               # demo network + live dashboard
 ```
 
-### See a real multi-process fleet
+### See a real multi-process network
 
 `kemi demo` runs in one process; to watch genuinely separate OS processes
 discover each other and trade work over live sockets, run:
@@ -135,28 +139,28 @@ a redundancy-checked paid job, and a 9-layer model sharded across the three
 provider processes — none holding the whole model. Point the providers'
 `--peer` at a real IP and the same script spans two machines.
 
-The CLI is bilingual — Turkish aliases ship with it: `katil/join`,
+The CLI is bilingual — Turkish aliases are included: `katil/join`,
 `filo/providers`, `bakiye/balance`, `calistir/run`, `durum/status`,
 `kimlik/id`, `ogren/learn`, `davet/invite`.
 
-### Ships and ranks
+### Node names and contribution tiers
 
-In Kemi (an old Turkish word for *ship*) every node is a **ship**, and humans
-see ship names instead of hex digests. As your ship earns credits by sharing
-compute, it climbs ranks — derived purely from the ledger, so ranks cannot
-be faked:
+A 64-character hex digest is impractical to read, so every node also gets a
+deterministic, memorable name derived from its id — "swift-gull-42". As a
+node earns credits by sharing compute it moves up the contribution tiers.
+Tiers are computed from the ledger alone, so they cannot be faked:
 
-| Credits earned | Rank |
+| Credits earned | Tier |
 |---|---|
-| 0+ | · Cabin Boy |
-| 25+ | ⚓ Deckhand |
-| 100+ | ⚓⚓ Helmsman |
-| 300+ | ⚓⚓⚓ First Mate |
-| 1000+ | ★ Captain |
-| 5000+ | ★★ Admiral |
+| 0+ | · Unranked |
+| 25+ | ▪ Contributor |
+| 100+ | ▪▪ Established |
+| 300+ | ▪▪▪ Trusted |
+| 1000+ | ◆ Principal |
+| 5000+ | ◆◆ Core |
 
-Your ship name and rank appear on the dashboard, in `kemi id` and in fleet
-listings.
+Node names appear everywhere a node is identified — the dashboard, `kemi id`
+and `kemi providers`. Your own tier is shown by `kemi id` and on the dashboard.
 
 ## How decentralisation works
 
@@ -165,7 +169,7 @@ listings.
 | **Peer discovery** | Kademlia DHT (the same approach as BitTorrent's trackerless mode, BEP 5). Providers publish signed records under per-task keys on the XOR-closest K nodes; records expire by TTL. Any running peer is a valid entry point. |
 | **Identity** | Ed25519 keypairs. `node_id = sha256(pubkey ‖ nonce)` must start with N zero bits: minting an identity costs **proof-of-work**, which makes Sybil attacks and faucet farming expensive. libsodium via PyNaCl when present, pure-Python RFC 8032 otherwise. |
 | **Payment** | No escrow, no tracker: a **per-chunk Ed25519-signed credit transfer** travels with each chunk. The ledger is a *grow-only set* of signed transactions (CRDT): it replicates by gossip and every replica converges regardless of arrival order. |
-| **Double-spending** | Two layers. **Prevention:** before accepting a payment, the provider consults the sender's deterministic **witness committee** (the K nodes closest to `sha256("kemi:witness:"+sender)`); witnesses lock the first transfer seen per `(sender, seq)`, co-sign a receipt and **veto** conflicts with evidence — of two racing payments at most one wins. **Detection:** even if a veto is missed, conflicting signed transactions are mathematical proof in the gossip; one is counted deterministically and the account is flagged forever. The committee adapts: it shrinks to whatever is reachable in small fleets and falls back to optimistic mode when alone (liveness is never lost). |
+| **Double-spending** | Two layers. **Prevention:** before accepting a payment, the provider consults the sender's deterministic **witness committee** (the K nodes closest to `sha256("kemi:witness:"+sender)`); witnesses lock the first transfer seen per `(sender, seq)`, co-sign a receipt and **veto** conflicts with evidence — of two racing payments at most one wins. **Detection:** even if a veto is missed, conflicting signed transactions are mathematical proof in the gossip; one is counted deterministically and the account is flagged forever. The committee adapts: it shrinks to whatever is reachable in small networks and falls back to optimistic mode when alone (liveness is never lost). |
 | **Fabricated results** | `--redundancy 2+`: every chunk runs on distinct providers, result fingerprints are compared, **majority wins**. Losers take a local reputation hit. |
 | **Reputation** | Each node keeps local (subjective) scores fed only by *first-hand* experience — shared reputation is trivially poisoned, first-hand experience is not. Double-spend evidence, by contrast, is objective and travels with the transactions themselves. |
 | **NAT traversal** | Every response echoes the requester's *observed* external address (no STUN server needed). A NATed provider keeps a persistent connection to any reachable peer, which relays its task traffic (TURN-style). Streaming multiplexes through the same session. |
@@ -173,8 +177,8 @@ listings.
 | **Privacy** | Chunk contents and results are **end-to-end encrypted** between consumer and provider (byte-compatible with NaCl `crypto_box`: X25519 + XSalsa20-Poly1305). Keys derive from the Ed25519 identities both sides already have — no handshake; relays only ever see ciphertext. Without PyNaCl a pure-Python implementation takes over; both produce identical bytes (tested against libsodium). |
 | **Large models** | **Pipeline parallelism**: with `run_pipeline` each stage's output feeds the next stage, so a layer-sharded model can run across providers none of which could host the whole model. Every stage gets the full scheduler treatment (chunking, retries, majority voting, signed payment, encryption). |
 | **GPU** | GPUs are discovered via `nvidia-smi` and advertised in resource records; the `transformers` backend can run on GPU. |
-| **Abuse resistance** | Per-source-IP token buckets on TCP requests and DHT datagrams, per-IP and global connection caps, relay-session quotas and DHT storage limits — one hostile host cannot starve the fleet, and limits never throttle a healthy local swarm. |
-| **Ledger growth** | Deterministic, content-hashed **checkpoints**: `prune()` folds history into a baseline (balances, spend sequences, lifetime earnings and double-spend verdicts survive; pre-checkpoint replays are rejected as stale). New ships **fast-bootstrap** by adopting a snapshot verified across multiple independent sources instead of replaying history. |
+| **Abuse resistance** | Per-source-IP token buckets on TCP requests and DHT datagrams, per-IP and global connection caps, relay-session quotas and DHT storage limits — one hostile host cannot starve the network, and limits never throttle a healthy local peer network. |
+| **Ledger growth** | Deterministic, content-hashed **checkpoints**: `prune()` folds history into a baseline (balances, spend sequences, lifetime earnings and double-spend verdicts survive; pre-checkpoint replays are rejected as stale). New nodes **fast-bootstrap** by adopting a snapshot verified across multiple independent sources instead of replaying history. |
 
 ### Trust model (the honest summary)
 
@@ -186,7 +190,7 @@ cases, with the evidence-and-flagging layer as the safety net wherever the
 committee is unreachable. Reputation plus the proof-of-work identity cost
 makes repeated attacks economically pointless.
 
-## Running a real fleet
+## Running a real network
 
 ```bash
 # 1. Start the first peer (it has no special role; it is merely first)
@@ -196,7 +200,7 @@ kemi node --port 7700
 kemi node --provide --peer FIRST_PEER_IP:7700 --price 0.5 --lan
 #    Behind NAT? --force-relay  (auto-detection is attempted too)
 
-# 3. View the fleet
+# 3. View the network
 kemi providers --peer FIRST_PEER_IP:7700
 
 # 4. Submit a job: chunked, cross-checked on 2 distinct providers
@@ -219,10 +223,10 @@ kemi node --peer FIRST_PEER_IP:7700 --ui 8080   # http://127.0.0.1:8080/
 All job traffic is **end-to-end encrypted by default** (provider records
 advertise the `e2e` capability; opt out with `Job(encrypt=False)`).
 
-### Drop-in OpenAI API — use the fleet from any AI tool
+### Drop-in OpenAI API — use the network from any AI tool
 
 `kemi serve` exposes a localhost endpoint that speaks the **OpenAI REST API**,
-backed by the fleet. Point any OpenAI-compatible client (Cursor, Continue,
+backed by the network. Point any OpenAI-compatible client (Cursor, Continue,
 LangChain, the `openai` SDK, OpenWebUI…) at it and it runs on Kemi — no API
 key, no account, no rewrite:
 
@@ -233,27 +237,27 @@ export OPENAI_API_KEY=kemi                  # any non-empty string
 ```
 
 Endpoints: `/v1/chat/completions` (incl. streaming), `/v1/embeddings`,
-`/v1/models`. The heavy inference runs on provider ships; the gateway just
+`/v1/models`. The heavy inference runs on provider nodes; the gateway just
 translates.
 
 ### Use it as a Python library
 
-Kemi is a library, not just a CLI - embedding the fleet in your own
+Kemi is a library, not just a CLI - embedding the network in your own
 application takes three lines:
 
 ```python
 import asyncio, kemi
 
 async def main():
-    async with kemi.connect(peer="FIRST_PEER_IP:7700") as fleet:
-        hashes = await fleet.run("hash.sha256", ["a", "b", "c"])
-        answer = await fleet.generate("Why do P2P networks matter?")
-        async for token in fleet.stream("Tell me a story"):   # live tokens
+    async with kemi.connect(peer="FIRST_PEER_IP:7700") as net:
+        hashes = await net.run("hash.sha256", ["a", "b", "c"])
+        answer = await net.generate("Why do P2P networks matter?")
+        async for token in net.stream("Explain consistent hashing"):  # live tokens
             print(token, end="", flush=True)
-        report = await fleet.run("data.aggregate", [records],
-                                 params={"group_by": "city", "op": "sum"},
-                                 redundancy=2, full_report=True)
-        print(fleet.ship, fleet.rank(), await fleet.balance())
+        report = await net.run("data.aggregate", [records],
+                               params={"group_by": "city", "op": "sum"},
+                               redundancy=2, full_report=True)
+        print(net.node_name, net.tier(), await net.balance())
 
 asyncio.run(main())
 ```
@@ -261,9 +265,11 @@ asyncio.run(main())
 `connect()` also accepts `invite="kemi1-…"`, `lan=True` (auto-discover on
 the local network), `share=True` (offer this machine's compute while
 connected) and `identity_path=`/`ledger_path=` for a persistent wallet.
-`fleet.pipeline([...], items)` runs multi-stage pipeline jobs.
+`net.pipeline([...], items)` runs multi-stage pipeline jobs. The handle
+class is `kemi.Network`; `kemi.Fleet`, `.ship` and `.rank()` are kept as
+aliases for code written before 1.11.
 
-### Chat with the fleet
+### Chat with the network
 
 ```bash
 kemi chat --peer FIRST_PEER_IP:7700
@@ -272,12 +278,12 @@ kemi chat --peer FIRST_PEER_IP:7700
 A conversational REPL: replies stream in token by token from the cheapest
 reputable provider, every reply shows its cost, and the transcript is kept
 locally so context-capable models (Ollama) hold a real conversation - the
-fleet itself stays stateless. Commands: `/balance`, `/clear`, `/quit`.
+network itself stays stateless. Commands: `/balance`, `/clear`, `/quit`.
 
 ### Plain-text jobs
 
 `kemi run --lines` treats input as plain text, one item per non-empty
-line - process a whole file across the fleet without writing JSON:
+line - process a whole file across the network without writing JSON:
 
 ```bash
 kemi run --peer ... --task text.wordcount --input corpus.txt --lines
@@ -288,7 +294,7 @@ kemi run --peer ... --task text.wordcount --input corpus.txt --lines
 A ✓/✗ readiness report with actionable hints: Python version, crypto
 backend, identity file, task execution, sandbox isolation, LAN multicast,
 GPU presence, Ollama availability and (with `--peer`) reachability and
-latency of a fleet peer.
+latency of a network peer.
 
 ### AI inference (with real models)
 
@@ -299,7 +305,7 @@ kemi node --provide --peer ... --ai-backend mock
 # A REAL local model — via Ollama (the recommended path):
 #   1) install Ollama from https://ollama.com
 #   2) ollama pull llama3.2
-#   3) open your compute to the fleet:
+#   3) open your compute to the network:
 kemi node --provide --peer ... --ai-backend ollama --ai-model llama3.2
 
 # Alternative: Hugging Face pipeline in-process (GPU used when present):
@@ -337,14 +343,14 @@ output growing in real time.
 
 `--ui PORT` gives every node a dependency-free control panel:
 
-- **Chat:** talk to the fleet's AI right in the panel — replies stream in
-  live, each tagged with its cost and the ship that produced it.
+- **Chat:** talk to the network's AI right in the panel — replies stream in
+  live, each tagged with its cost and the node that produced it.
 - **Providers (live):** price, reputation score, CPU/GPU, direct/relay path,
   e2e and stream badges — banned/flagged nodes filtered out automatically.
 - **Submit jobs:** pick a task, paste JSON items, set chunk size/redundancy;
   follow status and cost live; download full results as JSON.
 - **Ledger:** balance with a time-series sparkline, latest transfers, and any
-  double-spend evidence (⚑).
+  double-spend evidence.
 - **Reputation:** peer scores as this node sees them.
 
 The dashboard binds to `127.0.0.1` only by default (it has no auth; put it
@@ -355,7 +361,7 @@ behind a reverse proxy you trust if you must expose it). It refreshes every
 
 | Task | Description | Sandboxed |
 |---|---|---|
-| `ai.shard` | One transformer layer-group — the engine of fleet-wide big-model inference | ✓ |
+| `ai.shard` | One transformer layer-group — the engine of network-wide big-model inference | ✓ |
 | `ai.generate` | Text generation (mock/Ollama/transformers; live streaming; per-model via `--model`) | in-process (model memory) |
 | `ai.embed` | Batch text embeddings — the RAG building block | in-process (model memory) |
 | `ai.layer` | Layer-sharded model strip (pipeline parallelism) | ✓ |
@@ -395,11 +401,11 @@ the same way. New capabilities are added by registering tasks in
 | `kemi/ratelimit.py` | Per-IP token buckets and connection caps (DoS resistance) |
 | `kemi/economy.py` | Credit-economy model and `kemi economy` simulation |
 | `kemi/service.py` | systemd/launchd unit generation (`kemi service`) |
-| `kemi/names.py` | Character layer: ship names and ranks |
+| `kemi/names.py` | Node names and contribution tiers |
 | `kemi/invite.py` | Invite codes (`kemi1-…`, no secrets) |
 | `kemi/lan.py` | Zero-config LAN discovery (multicast beacon) |
-| `kemi/tutorial.py` | `kemi learn`: interactive tour on a live fleet |
-| `kemi/api.py` | High-level library API (`kemi.connect()` / `Fleet`) |
+| `kemi/tutorial.py` | `kemi learn`: interactive tour on a live network |
+| `kemi/api.py` | High-level library API (`kemi.connect()` / `Network`) |
 | `kemi/chat.py` | `kemi chat`: streaming conversational REPL |
 | `kemi/doctor.py` | `kemi doctor`: machine readiness diagnostics |
 | `kemi/cli.py`, `kemi/demo.py` | Bilingual CLI and the end-to-end demo |
@@ -418,8 +424,8 @@ NaCl implementation is verified byte-for-byte against libsodium, plus RFC
 and double-spend proofs, the witness committee blocking a concurrent
 double-spend race, live token streaming (with proof that no plaintext leaks
 on the wire), streaming through a relay, pipeline composition, a 25-node
-fleet, half the providers dying mid-job, restart-from-disk seq safety,
-deterministic ship names, rank thresholds, invite-code round-trips, LAN
+network, half the providers dying mid-job, restart-from-disk seq safety,
+deterministic node names, tier thresholds, invite-code round-trips, LAN
 beacon discovery, and the tutorial running end to end.
 
 ## Roadmap
@@ -431,7 +437,7 @@ beacon discovery, and the tutorial running end to end.
 - **ffmpeg & heavy workloads:** capability-gated audio/video transcoding,
   following the `sci.matmul` auto-advertise pattern.
 - **Trained-weight shards:** load real GGUF/safetensors weights into the
-  `ai.shard` path so the fleet serves an actual trained model (the sharding,
+  `ai.shard` path so the network serves an actual trained model (the sharding,
   verification and encryption machinery is already in place via `kemi shard`).
 - **KV-cache for sharded inference:** avoid recomputing past positions each
   token, the key optimisation for long sharded generations.

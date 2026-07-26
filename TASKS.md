@@ -1,10 +1,10 @@
 # Kemi — Task Backlog
 
-**Status: 1.2.0 released.** 16 of 18 backlog items shipped. Still open:
+**Status: 1.2.0 released.** 16 of 18 backlog items are complete. Still open:
 T2 (UDP hole-punching) and T9 (WASM runner) need things this sandbox can't
 genuinely test — real NATs and `wasmtime` — so they stay on the roadmap
-rather than ship as untested code. T8 (ffmpeg) is implemented capability-
-gated. T10 (fleet map) shipped in v1.3.
+rather than be released as untested code. T8 (ffmpeg) is implemented
+capability-gated. T10 (network map) was released in v1.3.
 
 Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 
@@ -12,7 +12,7 @@ Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 
 | ID | Status | Task | Impact | Effort |
 |----|--------|------|--------|--------|
-| T1 | ✅ | **Stake-weighted witness committees** — higher-earned ships preferred as witnesses near a sender's key; attacker must out-earn real ships *(v0.15)* | High | Medium |
+| T1 | ✅ | **Stake-weighted witness committees** — higher-earned nodes preferred as witnesses near a sender's key; an attacker must out-earn real nodes *(v0.15)* | High | Medium |
 | T2 | ⬜ | **UDP hole-punching** — direct NAT-to-NAT task traffic coordinated via the DHT, relay stays as fallback; cuts relay load and latency | High | High |
 | T3 | ✅ | **Protocol specification (SPEC.md)** — wire formats, DHT keys, tx/envelope schemas, witness flow; enables clients in other languages *(v0.14)* | Medium | Medium |
 | T4 | ✅ | **Result cache** — content-addressed LRU of (task, items, params) results on providers; identical work served instantly *(v0.14)* | Medium | Medium |
@@ -21,9 +21,9 @@ Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 
 | ID | Status | Task | Impact | Effort |
 |----|--------|------|--------|--------|
-| T5 | ✅ | **Real transformer layer sharding** — a real GPT forward pass split into per-ship layer groups via `ai.shard`; no machine holds the whole model, shards redundancy-verified and e2e-encrypted *(v0.12)* | High | High |
+| T5 | ✅ | **Real transformer layer sharding** — a real GPT forward pass split into per-node layer groups via `ai.shard`; no machine holds the whole model, shards redundancy-verified and e2e-encrypted *(v0.12)* | High | High |
 | T6 | ✅ | **Multi-model marketplace** — providers advertise model names (llama3.2, mistral…) in their records; consumers pick with `--model`; dashboard shows the model column *(v0.11)* | High | Medium |
-| T7 | ✅ | **`ai.embed` task** — batch embeddings over the fleet (Ollama embed API + deterministic mock); unlocks RAG-style workloads *(v0.11)* | Medium | Low |
+| T7 | ✅ | **`ai.embed` task** — batch embeddings across the network (Ollama embed API + deterministic mock); unlocks RAG-style workloads *(v0.11)* | Medium | Low |
 
 ## C — Workloads
 
@@ -36,7 +36,7 @@ Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 
 | ID | Status | Task | Impact | Effort |
 |----|--------|------|--------|--------|
-| T10 | ✅ | **Fleet map** — live topology in the dashboard (ships, relay links, reputation colour) *(v1.3)* | Medium | Medium |
+| T10 | ✅ | **Network map** — live topology in the dashboard (nodes, relay links, reputation colour) *(v1.3)* | Medium | Medium |
 | T11 | ✅ | **Job templates** — one-click presets (hash/wordcount/AI/embed/aggregate) in the dashboard *(v0.15)* | Medium | Low |
 | T12 | ✅ | **Bilingual dashboard** — TR/EN toggle for panel headings, welcome, buttons *(v1.2)* | Low | Low |
 
@@ -46,7 +46,7 @@ Pick by ID. Status: ⬜ open · 🟦 in progress · ✅ done.
 |----|--------|------|--------|--------|
 | T13 | ✅ | **Metrics & structured logs** — Prometheus `/metrics`, per-node counters in node.info *(v0.14)* | Medium | Low |
 | T14 | ✅ | **Service install** — `kemi service` generates systemd/launchd units so providers survive reboots *(v0.14)* | Medium | Low |
-| T15 | ✅ | **Docker image + compose fleet** — one-command containerised fleet *(v0.14)* | Medium | Low |
+| T15 | ✅ | **Docker image + compose network** — one-command containerised network *(v0.14)* | Medium | Low |
 
 ## F — Economy & Security
 

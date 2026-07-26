@@ -33,13 +33,13 @@ class ShipNameTests(unittest.TestCase):
 
 class RankTests(unittest.TestCase):
     def test_progression(self):
-        self.assertEqual(rank_for(0.0)[0], "Cabin Boy")
-        self.assertEqual(rank_for(30.0)[0], "Deckhand")
-        self.assertEqual(rank_for(150.0)[0], "Helmsman")
-        self.assertEqual(rank_for(500.0)[0], "First Mate")
-        self.assertEqual(rank_for(1500.0)[0], "Captain")
+        self.assertEqual(rank_for(0.0)[0], "Unranked")
+        self.assertEqual(rank_for(30.0)[0], "Contributor")
+        self.assertEqual(rank_for(150.0)[0], "Established")
+        self.assertEqual(rank_for(500.0)[0], "Trusted")
+        self.assertEqual(rank_for(1500.0)[0], "Principal")
         title, _, next_threshold = rank_for(10_000.0)
-        self.assertEqual(title, "Admiral")
+        self.assertEqual(title, "Core")
         self.assertIsNone(next_threshold)
 
     def test_next_threshold(self):
@@ -53,7 +53,7 @@ class RankTests(unittest.TestCase):
         for amount in (10.0, 20.0):
             ledger.add_tx(ledger.make_tx(alice, bob.node_id, amount))
         self.assertEqual(ledger.total_earned(bob.node_id), 30.0)
-        self.assertEqual(rank_for(ledger.total_earned(bob.node_id))[0], "Deckhand")
+        self.assertEqual(rank_for(ledger.total_earned(bob.node_id))[0], "Contributor")
         self.assertEqual(ledger.total_earned(alice.node_id), 0.0)  # spending ≠ earning
 
 

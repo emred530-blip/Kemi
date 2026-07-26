@@ -1,18 +1,19 @@
-"""The high-level Python API: use the fleet from three lines of code.
+"""The high-level Python API: use the network from three lines of code.
 
     import asyncio, kemi
 
     async def main():
-        async with kemi.connect(peer="203.0.113.7:7700") as fleet:
-            hashes = await fleet.run("hash.sha256", ["a", "b", "c"])
-            async for token in fleet.stream("Why do P2P networks matter?"):
+        async with kemi.connect(peer="203.0.113.7:7700") as net:
+            hashes = await net.run("hash.sha256", ["a", "b", "c"])
+            async for token in net.stream("Why do P2P networks matter?"):
                 print(token, end="", flush=True)
 
     asyncio.run(main())
 
 ``connect()`` joins as a light peer (no compute shared), with an ephemeral
 identity and in-memory wallet by default - pass ``identity_path`` /
-``ledger_path`` to keep a persistent wallet and earn toward ranks.
+``ledger_path`` to keep a persistent wallet and accumulate contribution
+tiers.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from .identity import Identity
 from .names import rank_for, ship_name
 from .node import PeerNode
 
-__all__ = ["Fleet", "connect", "Job", "JobError", "JobReport",
+__all__ = ["Network", "Fleet", "connect", "Job", "JobError", "JobReport",
            "PipelineStage", "PipelineReport"]
 
 
@@ -42,8 +43,8 @@ def _normalise_peers(peer: Any) -> list[tuple[str, int]]:
     return [p for item in peer for p in _normalise_peers(item)]
 
 
-class Fleet:
-    """A connected handle on the swarm. Create via :func:`connect`."""
+class Network:
+    """A connected handle on the peer network. Create via :func:`connect`."""
 
     def __init__(self, node: PeerNode):
         self.node = node
@@ -52,17 +53,25 @@ class Fleet:
     # -- identity ------------------------------------------------------------
 
     @property
-    def ship(self) -> str:
+    def node_name(self) -> str:
+        """This node's human-readable name (e.g. ``swift-gull-42``)."""
         return ship_name(self.node.identity.node_id)
+
+    # Kept for compatibility with code written before the 1.11 rename.
+    ship = node_name
 
     @property
     def node_id(self) -> str:
         return self.node.identity.node_id
 
-    def rank(self) -> str:
+    def tier(self) -> str:
+        """Contribution tier earned by serving compute."""
         title, insignia, _ = rank_for(
             self.node.ledger.total_earned(self.node.identity.node_id))
         return f"{insignia} {title}"
+
+    # Kept for compatibility with code written before the 1.11 rename.
+    rank = tier
 
     # -- money ----------------------------------------------------------------
 
@@ -77,7 +86,7 @@ class Fleet:
     # -- work --------------------------------------------------------------------
 
     async def models(self, task: str = "ai.generate") -> list[str]:
-        """AI model names currently on offer in the fleet."""
+        """AI model names currently on offer across the network."""
         return await self._consumer.models(task)
 
     async def run(self, task: str, items: list[Any], *,
@@ -85,7 +94,7 @@ class Fleet:
                   redundancy: int = 1, encrypt: bool = True,
                   chunk_timeout: float = 120.0, model: str | None = None,
                   full_report: bool = False) -> list[Any] | JobReport:
-        """Run a job across the fleet; returns the results (or the full
+        """Run a job across the network; returns the results (or the full
         :class:`JobReport` with ``full_report=True``)."""
         report = await self._consumer.run_job(Job(
             task=task, items=items, params=dict(params or {}),
@@ -104,13 +113,13 @@ class Fleet:
 
     async def embed(self, texts: list[str], *, redundancy: int = 1,
                     model: str | None = None) -> list[list[float]]:
-        """Embed a batch of texts across the fleet (RAG building block)."""
+        """Embed a batch of texts across the network (RAG building block)."""
         return await self.run("ai.embed", texts, chunk_size=8,
                               redundancy=redundancy, model=model)
 
     async def rag_search(self, query: str, documents: list[str], *, top_k: int = 3,
                          model: str | None = None) -> list[dict[str, Any]]:
-        """Retrieval-augmented search over the fleet: embed the query and
+        """Retrieval-augmented search over the network: embed the query and
         documents (ai.embed), then rank by cosine similarity (vector.search).
         Returns ``[{"document", "index", "score"}, ...]`` best-first."""
         if not documents:
@@ -154,8 +163,8 @@ class Fleet:
     async def shard_generate(self, prompt: str, *, max_tokens: int = 16,
                              redundancy: int = 1, temperature: float = 0.0,
                              spec: "ModelSpec | None" = None):
-        """Run a transformer sharded across the fleet — its layers split over
-        many ships, none holding the whole model. Returns a ShardReport."""
+        """Run a transformer sharded across the network — its layers split
+        over many nodes, none holding the whole model. Returns a ShardReport."""
         from .model import ModelSpec
         from .sharded import ShardedLLM
 
@@ -174,12 +183,12 @@ async def connect(peer: Any = None, *, invite: str | None = None,
                   lan: bool = False, identity_path: str | None = None,
                   ledger_path: str = ":memory:", share: bool = False,
                   price: float = 1.0, **node_kwargs: Any):
-    """Join the fleet and yield a :class:`Fleet` handle.
+    """Join the network and yield a :class:`Network` handle.
 
     ``peer`` accepts ``"host:port"``, a ``(host, port)`` tuple or a list of
-    either. Alternatively pass a friend's ``invite`` code, or ``lan=True``
-    to auto-discover a fleet on the local network. ``share=True`` also
-    offers this machine's compute while connected.
+    either. Alternatively pass an ``invite`` code, or ``lan=True`` to
+    auto-discover peers on the local network. ``share=True`` also offers
+    this machine's compute while connected.
     """
     peers = _normalise_peers(peer)
     if invite:
@@ -192,8 +201,12 @@ async def connect(peer: Any = None, *, invite: str | None = None,
                     ledger_path=ledger_path, provide=share, price=price,
                     **node_kwargs)
     await node.start()
-    fleet = Fleet(node)
+    handle = Network(node)
     try:
-        yield fleet
+        yield handle
     finally:
-        await fleet.close()
+        await handle.close()
+
+
+# The handle was called ``Fleet`` before 1.11. Existing code keeps working.
+Fleet = Network

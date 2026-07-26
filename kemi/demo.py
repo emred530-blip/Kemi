@@ -46,13 +46,13 @@ async def _wait_for_convergence(nodes: list[PeerNode], timeout: float = 15.0) ->
 
 
 async def run_demo(ui_port: int | None = None) -> int:
-    print("=== kemi demo: a decentralised local fleet (no tracker) ===\n")
+    print("=== kemi demo: a decentralised local network (no tracker) ===\n")
 
     print("[1/7] launching the bootstrap peer (an ordinary node; also the relay)...")
     bootstrap = PeerNode(Identity.create(), host="127.0.0.1", port=0)
     await bootstrap.start()
     peers = [("127.0.0.1", bootstrap.port)]
-    print(f"      port {bootstrap.port} (tcp+udp), ship {ship_name(bootstrap.identity.node_id)}")
+    print(f"      port {bootstrap.port} (tcp+udp), node {ship_name(bootstrap.identity.node_id)}")
 
     print("[2/7] providers joining the DHT...")
     p_cheap = PeerNode(Identity.create(), host="127.0.0.1", port=0, bootstrap=peers,
@@ -95,7 +95,7 @@ async def run_demo(ui_port: int | None = None) -> int:
     print(f"      the cheat's reputation in the consumer's eyes: {liar_score:.2f} "
           f"(banned: {consumer_node.reputation.is_banned(p_liar.identity.node_id)})")
 
-    print("\n[5/7] ai.generate job running on the fleet...")
+    print("\n[5/7] ai.generate job running on the network...")
     prompts = ["Why do P2P networks matter?", "What is the future of data centres?"]
     ai_report = await consumer.run_job(Job(
         task="ai.generate",
@@ -149,7 +149,7 @@ async def run_demo(ui_port: int | None = None) -> int:
 
         ui = WebUI(consumer_node, port=ui_port)
         await ui.start()
-        print(f"\nthe fleet keeps sailing - live dashboard: {ui.url}")
+        print(f"\nthe network stays online - live dashboard: {ui.url}")
         print("(you can submit jobs from the dashboard; Ctrl+C to stop)")
         try:
             await asyncio.Event().wait()

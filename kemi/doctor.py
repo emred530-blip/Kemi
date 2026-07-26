@@ -1,4 +1,4 @@
-"""``kemi doctor``: diagnose this machine's readiness for the fleet.
+"""``kemi doctor``: diagnose this machine's readiness to run a node.
 
 Runs a battery of local and network checks and prints a ✓/✗ report with
 actionable hints - the first thing to reach for when something feels off.
@@ -50,7 +50,7 @@ async def run_checks(peer: tuple[str, int] | None = None,
         if path.exists():
             identity = Identity.load_or_create(path)
             checks.append(_check("identity", True,
-                                 f"ship '{ship_name(identity.node_id)}' at {path}"))
+                                 f"node '{ship_name(identity.node_id)}' at {path}"))
         else:
             identity = Identity.create()
             ok = verify_node_id(identity.node_id, identity.public_key_hex,
@@ -125,7 +125,7 @@ async def run_checks(peer: tuple[str, int] | None = None,
             checks.append(_check(
                 "ollama", True,
                 f"Ollama running with {len(models)} model(s): {', '.join(models[:4])}",
-                "answer the fleet's questions for credits: "
+                "serve network queries for credits: "
                 f"kemi node --provide --ai-backend ollama --ai-model {first}"))
         else:
             checks.append(_check(
@@ -182,10 +182,10 @@ def render(checks: list[dict[str, Any]]) -> int:
             failed_critical = True
     print()
     if failed_critical:
-        print("✗ critical problems found - fix the items above before sailing")
+        print("FAIL: critical problems found - fix the items above before running a node")
         return 1
     if all(c["ok"] for c in checks):
-        print("⚓ all clear - this machine is ready to sail")
+        print("OK: this machine is ready to run a Kemi node")
     else:
-        print("⚓ seaworthy with notes - non-critical items above are optional")
+        print("OK with notes: the items above are optional improvements")
     return 0

@@ -35,8 +35,8 @@ class FleetMapTests(unittest.TestCase):
         from kemi.webui import _PAGE
 
         self.assertIn('id="fleetmap"', _PAGE)
-        self.assertIn("Fleet map", _PAGE)
-        self.assertIn("Filo haritası", _PAGE)        # bilingual
+        self.assertIn("Network map", _PAGE)
+        self.assertIn("Ağ haritası", _PAGE)        # bilingual
         # the map is drawn from live provider data + this node
         self.assertIn("s.providers.slice", _PAGE)
         self.assertIn("(you)", _PAGE)

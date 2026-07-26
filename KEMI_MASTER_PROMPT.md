@@ -2,36 +2,39 @@
 
 Bu dosya, Kemi projesinin TAMAMINI sıfırdan, tek bir prompt ile bir yapay zekâ
 kodlama asistanına (Claude Code, Cursor, vb.) yeniden ürettirmek için yazılmış
-gelişmiş "master prompt"tur. Aşağıdaki `PROMPT` bölümünü olduğu gibi kopyalayıp
-kendi localhost'unuzdaki asistana yapıştırın; boş bir klasörde çalıştırın.
+"master prompt"tur. Aşağıdaki `PROMPT` bölümünü olduğu gibi kopyalayıp kendi
+localhost'unuzdaki asistana yapıştırın; boş bir klasörde çalıştırın.
 
-> This file is the single advanced prompt that reproduces the entire Kemi
-> project from scratch. Copy the `PROMPT` section verbatim into your local AI
-> coding assistant and run it in an empty directory.
+> This file is the single prompt that reproduces the entire Kemi project from
+> scratch. Copy the `PROMPT` section verbatim into your local AI coding
+> assistant and run it in an empty directory.
 
 ---
 
 ## PROMPT
 
-Sen kıdemli bir dağıtık-sistemler mühendisisin. Bu klasörde **Kemi** adında,
+Kıdemli bir dağıtık-sistemler mühendisisiniz. Bu klasörde **Kemi** adında,
 BitTorrent benzeri, tamamen merkeziyetsiz bir P2P işlem gücü paylaşım ağını
-sıfırdan inşa edeceksin. Durup onay sorma; aşağıdaki plana göre kesintisiz
-şekilde **yaz → test et → commit'le** döngüsüyle ilerle ve her sürümü ancak tüm
-testler yeşilken tamamla.
+sıfırdan inşa edeceksiniz. Durup onay sormayın; aşağıdaki plana göre kesintisiz
+şekilde **yazma → test → commit** döngüsüyle ilerleyin ve her sürümü ancak tüm
+testler yeşilken tamamlayın.
 
 ### Ürün vizyonu
 
 - İnsanlar boştaki CPU/GPU'larını ağa kiralar ve karşılığında **kredi** kazanır;
-  kazandıkları krediyle filodaki başka makinelerde ağır işler (AI çıkarımı,
+  kazandıkları krediyle ağdaki başka makinelerde ağır işler (AI çıkarımı,
   hash, veri işleme, medya dönüştürme) çalıştırır.
-- **Hiçbir merkez yok**: tracker yok, sunucu yok, hesap yok, API anahtarı yok,
-  özel rol yok. Her düğüm eşittir; ağ BitTorrent gibi kendi kendine yaşar.
-- Tema: düğümler **gemi** (ship) adı taşır, rütbeler Miço'dan Amiral'e yükselir
-  (Cabin Boy → Admiral). Ürün dili İngilizce, ama CLI'de tüm komutların Türkçe
+- **Hiçbir merkezî bileşen yok**: tracker yok, sunucu yok, hesap yok, API
+  anahtarı yok, özel rol yok. Her düğüm eşittir; ağ, BitTorrent gibi yalnızca
+  katılımcılardan oluşur.
+- Her düğüm, kimliğinden türetilen okunabilir bir **düğüm adı** taşır (Docker
+  tarzı; örneğin `swift-gull-42`). Kazanılan krediye göre katkı seviyesi
+  `Unranked` → `Contributor` → `Established` → `Trusted` → `Principal` → `Core`
+  sırasıyla yükselir. Ürün dili İngilizce, ama CLI'de tüm komutların Türkçe
   takma adları da olacak (`katil`, `filo`, `bakiye`, `cuzdan`, `parcala`, `ara`,
   `uygulama` …).
-- Amiral gemisi özellik: **parçalı büyük model çıkarımı** — tek makinenin
-  belleğine sığmayan bir modeli katmanlarına bölüp farklı gemilere dağıtarak
+- Ayırt edici özellik: **parçalı büyük model çıkarımı** — tek makinenin
+  belleğine sığmayan bir modeli katmanlarına bölüp farklı düğümlere dağıtarak
   uçtan uca çalıştırmak.
 
 ### Mutlak mühendislik kuralları
@@ -43,11 +46,11 @@ testler yeşilken tamamla.
 2. **Önce test.** Her özellik kendi test dosyasıyla gelir; `python3 -m unittest
    discover -s tests` her commit'te yeşil olmalı. Hedef: ~200 test. Ağ testleri
    127.0.0.1 üzerinde gerçek soketlerle koşar; kararsız (flaky) test kabul
-   edilme — polling döngüsü + gerekirse bir kez yeniden deneme kalıbı kullan.
+   edilmez — polling döngüsü + gerekirse bir kez yeniden deneme kalıbı kullanın.
    Testlerde PoW zorluğu 4 bit olsun (üretimde 12).
 3. **Tek port:** her düğüm aynı port üzerinden hem TCP (iş protokolü) hem UDP
    (DHT) konuşur. Tel protokolü: 4 baytlık big-endian uzunluk öneki + JSON.
-   Bozuk/düşmanca girdi asla düğümü çökertmez (fuzz testleriyle kanıtla).
+   Bozuk/düşmanca girdi asla düğümü çökertmez (fuzz testleriyle kanıtlayın).
 4. **Durum tek yerde:** kimlik, defter ve itibar veritabanları
    `$KEMI_HOME` (varsayılan `~/.kemi`) altında yaşar.
 5. Kod yorumları ve dokümantasyon İngilizce; README hem "kodcu olmayanlar" hem
@@ -57,7 +60,7 @@ testler yeşilken tamamla.
 
 **Kimlik (`kemi/identity.py`, `kemi/crypto.py`)** — Ed25519 anahtar çifti;
 düğüm kimliği = açık anahtarın SHA-256'sı, ama geçerli sayılması için
-proof-of-work gerekir (kimlik üretirken nonce ara: hash'in ilk
+proof-of-work gerekir (kimlik üretirken nonce arayın: hash'in ilk
 `POW_DIFFICULTY_BITS=12` biti sıfır olmalı; Sybil saldırısını pahalılaştırır).
 Saf-Python Ed25519 gerçeklemesi `pynacl` ile bayt-uyumlu olmalı.
 
@@ -73,7 +76,7 @@ monoton `seq` numarasını taşır; herkes herkese `GENESIS_CREDITS=100` ile
 başlar. Aynı `seq` ile iki farklı transfer = **double-spend kanıtı**; kanıt
 dedikoduyla yayılır ve hile yapan kalıcı işaretlenir. `history()`, `balance()`,
 `total_earned()`, içerik-hash'li **checkpoint/prune** (geçmiş bir taban
-çizgisine katlanır, eski transferlerin tekrarı reddedilir, yeni gemiler
+çizgisine katlanır, eski transferlerin tekrarı reddedilir, yeni düğümler
 snapshot'ı birden çok kaynaktan doğrulayıp hızlı katılır).
 
 **Tanık komiteleri (`witness`)** — anlık double-spend *önleme*: ödeme,
@@ -110,9 +113,9 @@ kabuk yok, format allowlist), `ai.generate`, `ai.embed`, `vector.search`
 
 **Yürütme modeli (`kemi/consumer.py`, `kemi/node.py`)** — işler parçalara
 (chunk) bölünür, sağlayıcılara dağıtılır; **önce ödeme** (chunk başına imzalı
-mikro-ödeme), `redundancy=N` ile aynı parça N farklı gemide koşup oylanır
+mikro-ödeme), `redundancy=N` ile aynı parça N farklı düğümde koşup oylanır
 (deterministik görevlerde bozuk sonuç azınlıkta kalır ve itibar cezası yer);
-başarısız parça başka gemide yeniden denenir. Deterministik sonuçlar için
+başarısız parça başka düğümde yeniden denenir. Deterministik sonuçlar için
 içerik-adresli LRU **sonuç önbelleği** (`ai.generate` asla önbelleklenmez).
 Yük arttıkça ilan fiyatı 2x'e kadar süren **dinamik fiyatlandırma** (taban
 fiyat her zaman kabul tabanı). Prometheus tarzı `/metrics` + `node.info`
@@ -120,38 +123,40 @@ sayaçları.
 
 **Parçalı çıkarım (`kemi/model.py`, `kemi/sharded.py`)** — saf-Python,
 deterministik GPT-tarzı transformer referans gerçeklemesi; katmanlar ardışık
-gruplara bölünür, her grup `ai.shard` göreviyle FARKLI bir gemiye atanır.
+gruplara bölünür, her grup `ai.shard` göreviyle FARKLI bir düğüme atanır.
 Hiçbir katılımcı modelin tamamını tutmaz; gizli durumlar uçtan uca şifreli
-gezer (sağlayıcı yalnız kendi diliminin aktivasyonlarını görür, prompt'u asla).
-`ShardedLLM` sürücüsü, `Fleet.shard_generate()`, `kemi shard`/`parcala`.
+taşınır (sağlayıcı yalnız kendi diliminin aktivasyonlarını görür, prompt'u
+asla). `ShardedLLM` sürücüsü, `Network.shard_generate()`,
+`kemi shard`/`parcala`.
 
-**Yüksek seviye API (`kemi/api.py`)** — `kemi.connect(peer=...)` → `Fleet`:
-`run()`, `generate()`, `stream()`, `embed()`, `rag_search()`,
-`shard_generate()`, `run_pipeline()` (boru hattı paralelliği), `balance()`,
-`models()`. Üç satırda iş çalıştırılabilmeli.
+**Yüksek seviye API (`kemi/api.py`)** — `kemi.connect(peer=...)` → `Network`
+tutamağı (eski `Fleet` adı geriye dönük takma ad olarak korunur): `run()`,
+`generate()`, `stream()`, `embed()`, `rag_search()`, `shard_generate()`,
+`run_pipeline()` (boru hattı paralelliği), `balance()`, `models()`. Üç satırda
+iş çalıştırılabilmeli.
 
 **OpenAI uyumlu geçit (`kemi/openai_gateway.py`)** — `kemi serve` (port
 11434): `/v1/chat/completions` (SSE streaming dahil), `/v1/embeddings`,
-`/v1/models` uçlarını filoya köprüler. `OPENAI_BASE_URL` değiştiren her araç
+`/v1/models` uçlarını ağa köprüler. `OPENAI_BASE_URL` değiştiren her araç
 (Cursor, Continue, LangChain, `openai` SDK) Kemi üzerinde çalışır; anahtar yok.
 
 **Pano (`kemi/webui.py`)** — bağımlılıksız gömülü web panosu: sağlayıcılar,
 işler, defter, itibar, canlı sohbet (akış + maliyet), bakiye grafiği, tek tık
-iş şablonları, **filo haritası** (merkezde bu gemi, halkada sağlayıcılar,
+iş şablonları, **ağ haritası** (merkezde bu düğüm, halkada sağlayıcılar,
 röle bağları kesikli, itibara göre renk), TR/EN dil düğmesi, PWA (manifest +
 service worker + saf-Python üretilmiş ikonlar; telefona kurulabilir).
 `kemi app --phone` panoyu LAN'a açar.
 
 **Katılım (`kemi/discovery.py`, `kemi/lan.py`, `kemi/invite.py`,
 `kemi/names.py`, `kemi/tutorial.py`)** — `kemi join`: 60 saniyelik sihirbaz
-(gemi kimliği, çok noktaya yayınla LAN keşfi, paylaş/izle seçimi, pano, davet
-kodu). `kemi1-…` davet kodları yalnız bağlantı bilgisi taşır. Deterministik
-gemi adları + deftere dayalı rütbeler. `kemi learn`: canlı yerel filoda 3
+(düğüm kimliği, multicast LAN keşfi, paylaş/izle seçimi, pano, davet kodu).
+`kemi1-…` davet kodları yalnız bağlantı bilgisi taşır. Deterministik düğüm
+adları + deftere dayalı katkı seviyeleri. `kemi learn`: canlı yerel ağda 3
 dakikalık tur.
 
 **CLI (`kemi/cli.py`)** — komutlar (hepsi Türkçe takma adlı): `node`, `app`,
 `join`, `run` (`--stream`, `--lines`, `--redundancy`, `--model`), `chat`,
-`serve`, `shard`, `search`, `wallet` (bakiye + rütbe + son işlemler),
+`serve`, `shard`, `search`, `wallet` (bakiye + katkı seviyesi + son işlemler),
 `providers`, `models`, `status`, `doctor`, `economy`, `service`
 (systemd/launchd kurulumu), `demo`, `learn`.
 
@@ -172,7 +177,7 @@ dillerde istemci yazmaya yetecek tam protokol belgesi. `CHANGELOG.md`,
 3. **0.3** E2E şifreleme + boru hattı paralelliği. **0.4** Pano.
 4. **0.5** Ollama + canlı token akışı + gerçek iş yükleri + 25-düğüm ölçek
    testleri. **0.6** Tanık komiteleri + röleden akış.
-5. **0.7–0.8** Katılım sihirbazı, davet kodu, LAN keşfi, gemi adları,
+5. **0.7–0.8** Katılım sihirbazı, davet kodu, LAN keşfi, düğüm adları,
    İngilizce-öncelik + Türkçe takma adlar, lisans/CI.
 6. **0.9** Üç satırlık Python API + `chat` + `doctor`. **0.10** DoS koruması +
    defter checkpoint/prune + panoda sohbet.
@@ -182,7 +187,7 @@ dillerde istemci yazmaya yetecek tam protokol belgesi. `CHANGELOG.md`,
    SPEC. **0.15** Stake-ağırlıklı tanıklar + ekonomi simülasyonu + iş
    şablonları.
 9. **1.0** Kararlı sürüm. **1.1** PWA/mobil. **1.2** RAG + iki dilli pano +
-   indirilebilir uygulamalar. **1.3** Filo haritası + medya dönüştürme +
+   indirilebilir uygulamalar. **1.3** Ağ haritası + medya dönüştürme +
    `search`. **1.4** OpenAI geçidi. **1.5** `wallet` + itibar solması
    (double-spend affı yok) + `$KEMI_HOME`.
 
@@ -195,5 +200,5 @@ SDK'sı sohbet tamamlaması alır. Her sürüm CHANGELOG'a işlenir.
 
 ---
 
-*Prompt sonu. Bu dosyanın üstündeki `PROMPT` bölümünü kopyalayıp asistanına
-ver; gerisini o halleder.*
+*Prompt sonu. Bu dosyanın üstündeki `PROMPT` bölümünü kopyalayıp asistanınıza
+verin; gerisini o yürütür.*

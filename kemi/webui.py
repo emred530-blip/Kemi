@@ -329,28 +329,28 @@ class WebUI:
             bal = node.ledger.balance(node.identity.node_id)
             earned = node.ledger.total_earned(node.identity.node_id)
             say = (f"Bakiye {bal:.2f} kredi, toplam kazanç {earned:.2f}. "
-                   f"Filoda {len(self._merged_providers())} sağlayıcı görünüyor.")
+                   f"Ağda {len(self._merged_providers())} sağlayıcı görünüyor.")
         elif intent == "saglayicilar":
             rows = self._merged_providers()
             if rows:
                 top = ", ".join(f"{ship_name(p['node_id'])} ({p['price']:.2f} kredi)"
                                 for p in rows[:4])
-                say = f"{len(rows)} gemi hazır: {top}."
+                say = f"{len(rows)} sağlayıcı hazır: {top}."
             else:
-                say = "Şu an keşfedilmiş sağlayıcı yok kaptan."
+                say = "Şu an ağda keşfedilmiş sağlayıcı yok."
         elif intent == "is_hash":
             try:
                 entry = self._submit_job({"task": "hash.sha256",
                                           "items": ["kemi", "filo", "ruzgar"],
                                           "chunk_size": 4, "redundancy": 1})
-                say = f"Emredersiniz. Hash işi {entry['id']} filoya gönderildi."
+                say = f"Onaylandı. Hash işi {entry['id']} ağa gönderildi."
             except (ValueError, JobError) as exc:
                 say, done = f"İş gönderilemedi: {exc}", False
         elif intent == "sor":
             question = got["payload"] or text
             try:
                 self._submit_chat(question)
-                say = "Filoya soruldu, yanıt sohbet panelinde akacak."
+                say = "Ağa iletildi; yanıt sohbet panelinde görüntülenecek."
             except ValueError as exc:
                 say, done = str(exc), False
         elif intent == "dil":
@@ -373,7 +373,7 @@ class WebUI:
                    "davet kodu, beyin durumu.")
         else:
             done = False
-            say = "Anlayamadım kaptan. Aşağıdan doğru komutu seçerseniz öğrenirim."
+            say = "Komut anlaşılamadı. Aşağıdan doğru komutu seçerseniz öğrenirim."
         return {"ok": done, "intent": intent, "confidence": got["confidence"],
                 "say": say, "intents": INTENTS}
 
@@ -548,7 +548,7 @@ _PAGE = """<!doctype html>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icon.png">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
-<title>kemi — fleet panel</title>
+<title>kemi — node panel</title>
 <style>
   :root { --bg:#0a1120; --card:#101c31; --card-2:#0e1930; --line:#1d2c47;
           --line-soft:#16233c; --fg:#e9eef7; --dim:#93a1bc; --faint:#5f6d8c;
@@ -615,23 +615,23 @@ _PAGE = """<!doctype html>
   footer { padding:8px 22px 20px; color:var(--faint); font-size:12px; }
 </style></head><body>
 <header>
-  <h1>kemi <span class="dim" data-i18n="panel">fleet panel</span></h1>
+  <h1>kemi <span class="dim" data-i18n="panel">node panel</span></h1>
   <span id="nodeinfo" class="dim"></span>
   <button id="invitebtn" type="button" data-i18n="invite"
-          style="width:auto;padding:7px 14px;margin-left:8px">⚓ Invite a friend</button>
+          style="width:auto;padding:7px 14px;margin-left:8px">Invite a peer</button>
   <button id="langbtn" type="button" title="Türkçe / English"
           style="width:auto;padding:7px 12px">TR</button>
   <span class="balance"><span id="balance">…</span>
         <span class="dim" data-i18n="credits">credits</span></span>
 </header>
 <p id="welcome" style="margin:0;padding:6px 22px;color:var(--dim);border-bottom:1px solid var(--line)">
-  <span data-i18n="welcome">Welcome aboard! Ask the AI below, or share an invite so friends pool their computers with yours.</span>
+  <span data-i18n="welcome">This node is connected to the network. Query the AI below, or share an invite to add more nodes.</span>
 </p>
 <main>
   <section>
     <h2 data-i18n="providers">Providers (live)</h2>
     <table><thead><tr>
-      <th>ship</th><th>price</th><th>rep</th><th>cpu/gpu</th><th>path</th><th>tasks</th>
+      <th>node</th><th>price</th><th>rep</th><th>cpu/gpu</th><th>path</th><th>tasks</th>
     </tr></thead><tbody id="providers"></tbody></table>
   </section>
   <section>
@@ -654,7 +654,7 @@ _PAGE = """<!doctype html>
         <textarea id="items">["hello", "world"]</textarea></div>
       <div><label>params (JSON object)</label>
         <input id="params" value="{}"></div>
-      <button type="submit" data-i18n="send">send to the fleet</button>
+      <button type="submit" data-i18n="send">submit to network</button>
       <div id="jobmsg"></div>
     </form>
     <table><thead><tr>
@@ -662,16 +662,16 @@ _PAGE = """<!doctype html>
     </tr></thead><tbody id="jobs"></tbody></table>
   </section>
   <section>
-    <h2 data-i18n="chat">Chat with the fleet</h2>
+    <h2 data-i18n="chat">Query the network</h2>
     <div id="chatlog" style="max-height:260px;overflow-y:auto;margin-bottom:10px"></div>
     <form id="chatform" style="grid-template-columns:1fr auto;display:grid;gap:8px">
-      <input id="chatmsg" placeholder="ask the fleet's AI anything…"
+      <input id="chatmsg" placeholder="ask the network anything…"
              data-i18n-ph="chatph" autocomplete="off">
       <button type="submit" style="width:auto;padding:7px 14px">send</button>
     </form>
   </section>
   <section>
-    <h2 data-i18n="voice">Captain's bridge (voice)</h2>
+    <h2 data-i18n="voice">Voice commands</h2>
     <div style="display:flex;gap:10px;align-items:center">
       <button id="micbtn" type="button" title="konuş / speak"
               style="width:auto;padding:9px 16px;font-size:18px">🎙</button>
@@ -703,16 +703,16 @@ _PAGE = """<!doctype html>
   <section>
     <h2 data-i18n="reputation">Reputation (as this node sees it)</h2>
     <table><thead><tr>
-      <th>ship</th><th>score</th><th>good</th><th>bad</th><th>events</th>
+      <th>node</th><th>score</th><th>good</th><th>bad</th><th>events</th>
     </tr></thead><tbody id="reputation"></tbody></table>
   </section>
   <section>
-    <h2 data-i18n="map">Fleet map</h2>
+    <h2 data-i18n="map">Network map</h2>
     <svg id="fleetmap" width="100%" height="260" viewBox="0 0 400 260"
          preserveAspectRatio="xMidYMid meet"></svg>
   </section>
   <section id="braincard" style="display:none">
-    <h2 data-i18n="brain">Synapse brain (self-training)</h2>
+    <h2 data-i18n="brain">Synapse network (self-training)</h2>
     <svg id="brainviz" width="100%" height="210" viewBox="0 0 400 210"
          preserveAspectRatio="xMidYMid meet"></svg>
     <svg id="brainloss" width="100%" height="34" viewBox="0 0 400 34"
@@ -737,14 +737,14 @@ let _inviteCode = '';
 function render(s) {
   $('#balance').textContent = s.balance.toFixed(2);
   _inviteCode = s.node.invite || '';
-  $('#nodeinfo').textContent = `⚓ ${s.node.name} · ${s.node.rank} · port ${s.node.port}` +
+  $('#nodeinfo').textContent = `${s.node.name} · ${s.node.rank} · port ${s.node.port}` +
     (s.node.provide ? ` · provider (${s.node.price} cr/item)` : ' · peer') +
     (s.node.relayed ? ' · via relay' : '');
   $('#footer').textContent = `kemi v${s.version} · ledger: ${s.ledger.txs} txs · ` +
     `DHT: ${s.dht_contacts} contacts · refreshes every 2s`;
 
   $('#providers').innerHTML = s.providers.map(p => `<tr>
-    <td title="${esc(p.id)}">⚓ ${esc(p.name || short(p.id))}</td>
+    <td title="${esc(p.id)}">${esc(p.name || short(p.id))}</td>
     <td>${p.price.toFixed(2)}</td>
     <td class="${p.rep >= 0.5 ? 'ok' : 'bad'}">${p.rep.toFixed(2)}</td>
     <td>${p.cpu ?? '?'} / ${p.gpus}</td>
@@ -779,22 +779,22 @@ function render(s) {
 
   const chat = s.chat || {log: [], live: '', busy: false};
   const liveRow = chat.busy
-    ? `<div><span class="lnk">fleet ⚡</span> <span class="dim">${esc(chat.live)}▋</span></div>`
+    ? `<div><span class="lnk">network</span> <span class="dim">${esc(chat.live)}▋</span></div>`
     : '';
   $('#chatlog').innerHTML = chat.log.map(m => {
-    if (m.role === 'you') return `<div><span class="ok">you ⚓</span> ${esc(m.text)}</div>`;
+    if (m.role === 'you') return `<div><span class="ok">you</span> ${esc(m.text)}</div>`;
     if (m.role === 'error') return `<div class="bad">⚠ ${esc(m.text)}</div>`;
     const via = [`${(m.cost ?? 0).toFixed(2)} cr`, m.ship,
                  m.model && m.model !== 'mock' ? m.model : ''].filter(Boolean);
-    return `<div><span class="lnk">fleet</span> ${esc(m.text)} ` +
+    return `<div><span class="lnk">network</span> ${esc(m.text)} ` +
            `<span class="dim">[${esc(via.join(' · '))}]</span></div>`;
   }).join('') + liveRow ||
-    '<div class="dim">no conversation yet - say hello</div>';
+    '<div class="dim">no queries yet</div>';
   if (chat.busy || chat.log.length !== window._chatLen) {
     window._chatLen = chat.log.length;
     $('#chatlog').scrollTop = $('#chatlog').scrollHeight;
   }
-  // In voice mode, read new fleet replies aloud (never the backlog).
+  // In voice mode, read new network replies aloud (never the backlog).
   if (window._chatSpoken === undefined) window._chatSpoken = chat.log.length;
   while (window._chatSpoken < chat.log.length) {
     const m = chat.log[window._chatSpoken++];
@@ -813,7 +813,7 @@ function render(s) {
     $('#sparkline').setAttribute('points', pts.join(' '));
   }
 
-  // Fleet map: this ship at the centre, providers on a ring around it.
+  // Network map: this node at the centre, providers on a ring around it.
   const map = $('#fleetmap');
   const cx = 200, cy = 130, R = 95;
   const peers = s.providers.slice(0, 16);
@@ -836,7 +836,7 @@ function render(s) {
           + `text-anchor="middle">${esc(s.node.name)} (you)</text>`;
   if (!peers.length) {
     mapSvg += `<text x="${cx}" y="${cy + 50}" fill="#8b949e" font-size="10" `
-            + `text-anchor="middle">no other ships discovered yet</text>`;
+            + `text-anchor="middle">no other nodes discovered yet</text>`;
   }
   map.innerHTML = mapSvg;
 
@@ -846,7 +846,7 @@ function render(s) {
     <td>${t.amount.toFixed(2)}</td><td class="dim">${ago(t.ts, s.now)} ago</td>
   </tr>`).join('') || '<tr><td colspan="4" class="dim">no transfers yet</td></tr>';
   $('#flagged').innerHTML = s.ledger.flagged.length
-    ? `<p class="bad">⚑ double-spend evidence: ${s.ledger.flagged.map(short).join(', ')}</p>` : '';
+    ? `<p class="bad">double-spend evidence: ${s.ledger.flagged.map(short).join(', ')}</p>` : '';
 
   const reps = Object.entries(s.reputation);
   $('#reputation').innerHTML = reps.map(([id, r]) => `<tr>
@@ -858,7 +858,7 @@ function render(s) {
   if (s.brain) renderBrain(s.brain);
 }
 
-// The ship's self-training brain: neurons as circles, synapses as lines
+// The node's self-training network: neurons as circles, synapses as lines
 // (green = excitatory, red = inhibitory, thickness = |weight|).
 function renderBrain(b) {
   $('#braincard').style.display = '';
@@ -916,12 +916,12 @@ $('#jobform').addEventListener('submit', async (ev) => {
     const r = await (await fetch('/api/job',
       { method: 'POST', body: JSON.stringify(spec) })).json();
     msg.className = r.ok ? 'ok' : 'bad';
-    msg.textContent = r.ok ? `job ${r.job} sent to the fleet` : `error: ${r.error}`;
+    msg.textContent = r.ok ? `job ${r.job} submitted to the network` : `error: ${r.error}`;
     refresh();
   } catch (e) { msg.className = 'bad'; msg.textContent = 'error: ' + e.message; }
 });
 
-// ---- the captain's voice bridge ----
+// ---- voice command interface ----
 const VOICE_LABELS = {durum:'durum raporu', saglayicilar:'sağlayıcılar',
   is_hash:'hash işi', sor:'filoya sor', dil:'dil değiştir',
   davet:'davet kodu', beyin:'beyin durumu', yardim:'yardım'};
@@ -942,14 +942,14 @@ function vlog(who, text, cls) {
 }
 async function voiceCommand(text) {
   _lastUtterance = text;
-  vlog('siz 🎙', text, 'ok');
+  vlog('siz', text, 'ok');
   $('#voicefix').style.display = 'none';
   try {
     const r = await (await fetch('/api/voice',
       {method: 'POST', body: JSON.stringify({text})})).json();
     const tag = r.intent
       ? ` [${VOICE_LABELS[r.intent] || r.intent} · %${Math.round(r.confidence * 100)}]` : '';
-    vlog('köprü ⚓', r.say + tag, r.ok ? 'lnk' : 'bad');
+    vlog('sistem', r.say + tag, r.ok ? 'lnk' : 'bad');
     speak(r.say);
     $('#voiceintents').innerHTML = (r.intents || []).map(i =>
       `<button type="button" class="tpl" data-vi="${i}">${VOICE_LABELS[i] || i}</button>`
@@ -958,7 +958,7 @@ async function voiceCommand(text) {
       b.addEventListener('click', async () => {
         await fetch('/api/voice/learn', {method: 'POST',
           body: JSON.stringify({text: _lastUtterance, intent: b.dataset.vi})});
-        vlog('köprü ⚓',
+        vlog('sistem',
              `öğrendim: "${_lastUtterance}" → ${VOICE_LABELS[b.dataset.vi]}`, 'ok');
         $('#voicefix').style.display = 'none';
       }));
@@ -966,7 +966,7 @@ async function voiceCommand(text) {
     if (r.intent === 'dil') $('#langbtn').click();
     if (r.intent === 'davet') $('#invitebtn').click();
     refresh();
-  } catch (e) { vlog('köprü ⚓', 'düğüme ulaşılamadı', 'bad'); }
+  } catch (e) { vlog('sistem', 'düğüme ulaşılamadı', 'bad'); }
 }
 $('#voiceform').addEventListener('submit', ev => {
   ev.preventDefault();
@@ -1042,26 +1042,26 @@ $('#invitebtn').addEventListener('click', async () => {
   if (!_inviteCode) return;
   const cmd = 'kemi join --invite ' + _inviteCode;
   try { await navigator.clipboard.writeText(cmd); } catch (e) {}
-  window.prompt('Send this to a friend — they paste it and run it to join your fleet:', cmd);
+  window.prompt('Share this command — running it joins their node to your network:', cmd);
 });
 
 const I18N = {
-  en: {panel:'fleet panel', invite:'⚓ Invite a friend', credits:'credits',
-       welcome:'Welcome aboard! Ask the AI below, or share an invite so friends pool their computers with yours.',
+  en: {panel:'node panel', invite:'Invite a peer', credits:'credits',
+       welcome:'This node is connected to the network. Query the AI below, or share an invite to add more nodes.',
        providers:'Providers (live)', submit:'Submit a job',
-       chat:'Chat with the fleet', ledger:'Ledger (latest transfers)',
-       reputation:'Reputation (as this node sees it)', send:'send to the fleet', map:'Fleet map',
-       brain:'Synapse brain (self-training)', voice:"Captain's bridge (voice)",
+       chat:'Query the network', ledger:'Ledger (latest transfers)',
+       reputation:'Reputation (as this node sees it)', send:'submit to network', map:'Network map',
+       brain:'Synapse network (self-training)', voice:'Voice commands',
        voicesend:'send', voicefixlabel:'I meant:',
-       chatph:"ask the fleet's AI anything…"},
-  tr: {panel:'filo paneli', invite:'⚓ Arkadaş davet et', credits:'kredi',
-       welcome:'Hoş geldin! Aşağıdan yapay zekâya sor ya da bir davet paylaş; arkadaşların bilgisayarlarını seninkiyle birleştirsin.',
+       chatph:'ask the network anything…'},
+  tr: {panel:'düğüm paneli', invite:'Düğüm davet et', credits:'kredi',
+       welcome:'Bu düğüm ağa bağlı. Aşağıdan yapay zekâya sorgu gönderin ya da davet paylaşarak yeni düğümler ekleyin.',
        providers:'Sağlayıcılar (canlı)', submit:'İş gönder',
-       chat:'Filoyla sohbet et', ledger:'Defter (son transferler)',
-       reputation:'İtibar (bu düğümün gözünden)', send:'filoya gönder', map:'Filo haritası',
-       brain:'Sinaps ağı (kendi kendini eğitir)', voice:'Kaptan köşkü (sesli komut)',
+       chat:'Ağa sorgu gönder', ledger:'Defter (son transferler)',
+       reputation:'İtibar (bu düğümün gözünden)', send:'ağa gönder', map:'Ağ haritası',
+       brain:'Sinaps ağı (kendi kendini eğitir)', voice:'Sesli komutlar',
        voicesend:'gönder', voicefixlabel:'bunu kastetmiştim:',
-       chatph:'filonun yapay zekâsına istediğini sor…'},
+       chatph:'ağın yapay zekâsına sorgunuzu yazın…'},
 };
 function applyLang(lang) {
   const dict = I18N[lang] || I18N.en;
@@ -1094,9 +1094,9 @@ setInterval(refresh, 500);
 """
 
 _MANIFEST = json.dumps({
-    "name": "Kemi — fleet panel",
+    "name": "Kemi — node panel",
     "short_name": "Kemi",
-    "description": "Decentralised peer-to-peer compute & AI on the fleet",
+    "description": "Decentralised peer-to-peer compute and AI network",
     "start_url": "/",
     "display": "standalone",
     "background_color": "#0d1117",

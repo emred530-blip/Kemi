@@ -48,8 +48,11 @@ class FleetApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_identity_and_money_surface(self):
         async with self._connect() as fleet:
             self.assertEqual(len(fleet.node_id), 64)
-            self.assertIn("-", fleet.ship)
-            self.assertIn("Cabin Boy", fleet.rank())
+            self.assertIn("-", fleet.node_name)
+            self.assertIn("Unranked", fleet.tier())
+            # pre-1.11 names still work
+            self.assertEqual(fleet.ship, fleet.node_name)
+            self.assertEqual(fleet.rank(), fleet.tier())
             self.assertEqual(await fleet.balance(), 100.0)
             providers = await fleet.providers("hash.sha256")
             self.assertEqual(len(providers), 2)

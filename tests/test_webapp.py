@@ -1,4 +1,4 @@
-"""The public harbor (`kemi web`): visitors chat with the fleet from a browser."""
+"""The public access portal (`kemi web`): visitors query the network from a browser."""
 
 import asyncio
 import json
@@ -32,7 +32,7 @@ def _get(url):
             return r.status, body.decode()
 
 
-class HarborTests(unittest.IsolatedAsyncioTestCase):
+class AccessPortalTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.nodes: list[PeerNode] = []
         self.bootstrap = await self._spawn()
@@ -71,7 +71,7 @@ class HarborTests(unittest.IsolatedAsyncioTestCase):
             if not state["busy"]:
                 return state
             await asyncio.sleep(0.2)
-        self.fail("harbor reply never finished")
+        self.fail("portal reply never finished")
 
     async def test_page_and_hello_mint_a_funded_guest(self):
         status, page = await asyncio.to_thread(_get, self.base + "/")
@@ -88,7 +88,7 @@ class HarborTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(again["token"], guest["token"])
         self.assertEqual(again["name"], guest["name"])
 
-    async def test_ask_answers_from_the_fleet_and_debits_the_guest(self):
+    async def test_ask_answers_from_the_network_and_debits_the_guest(self):
         _, guest = await asyncio.to_thread(_post, self.base + "/api/hello", {})
         state = await self._ask_and_wait(guest["token"], "merhaba filo")
         reply = state["log"][-1]
@@ -128,7 +128,7 @@ class HarborTests(unittest.IsolatedAsyncioTestCase):
             status = exc.code
         self.assertEqual(status, 400)
 
-    async def test_guests_survive_a_harbor_restart(self):
+    async def test_guests_survive_a_portal_restart(self):
         _, guest = await asyncio.to_thread(_post, self.base + "/api/hello", {})
         state = await self._ask_and_wait(guest["token"], "kalici misin?")
         self.assertEqual(state["balance"], 4.5)
@@ -146,8 +146,23 @@ class HarborTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["log"][-1]["role"], "fleet")
 
 
-class KeeperPanelTests(unittest.IsolatedAsyncioTestCase):
-    """The /admin keeper's panel: key-gated harbor operations."""
+    async def test_legacy_harbor_state_is_adopted(self):
+        # State lived in harbor.json before the 1.11 rename; an upgraded
+        # portal must keep its visitors instead of silently starting fresh.
+        legacy = os.path.join(self.tmp.name, "harbor.json")
+        with open(legacy, "w", encoding="utf-8") as fh:
+            json.dump({"guests": {"tok": {"name": "old-node-1", "balance": 3.5,
+                                          "spent": 1.5, "asks": 2}},
+                       "faucet": 7.0}, fh)
+        app = WebApp(self.host_node, host="127.0.0.1", port=0, faucet=5.0,
+                     state_path=os.path.join(self.tmp.name, "portal.json"))
+        self.assertEqual(app._guests["tok"]["balance"], 3.5)
+        self.assertEqual(app._guests["tok"]["name"], "old-node-1")
+        self.assertEqual(app.faucet, 7.0)
+
+
+class OperatorConsoleTests(unittest.IsolatedAsyncioTestCase):
+    """The /admin operator console: key-gated portal operations."""
 
     async def asyncSetUp(self):
         self.nodes: list[PeerNode] = []
@@ -227,7 +242,7 @@ class KeeperPanelTests(unittest.IsolatedAsyncioTestCase):
         except urllib.error.HTTPError as exc:
             status, body = exc.code, json.loads(exc.read())
         self.assertEqual(status, 401)
-        self.assertIn("banned", body["error"])
+        self.assertIn("suspended", body["error"])
         _, r = await asyncio.to_thread(_post, self.base + "/admin/api/faucet",
                                        {"key": "test-key", "amount": 2.5})
         self.assertEqual(r["faucet"], 2.5)

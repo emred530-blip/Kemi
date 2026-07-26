@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.11.0 — Professional positioning
+Kemi is infrastructure, and the interface now reads like it. The maritime
+metaphor that ran through the product (ships, fleets, harbors, captains,
+naval ranks) is replaced everywhere by the vocabulary operators actually
+use. No protocol, wire-format or on-disk change — this is the product's
+language and presentation.
+
+- **Terminology**: ship → node, fleet → network, harbor → access portal,
+  captain/keeper → operator. Naval ranks became contribution tiers
+  (Unranked, Contributor, Established, Trusted, Principal, Core) that state
+  plainly how much compute a node has served. Node names (`swift-gull-42`)
+  stay: they are a Docker-style identifier scheme, not a metaphor.
+- **Public API**: the connection handle is now `kemi.Network` with
+  `node_name` and `tier()`. `kemi.Fleet`, `.ship` and `.rank()` remain as
+  aliases, so existing code keeps working unchanged.
+- **UI**: sober sans typography replaces the serif display face; decorative
+  emoji and the ASCII ship banner are gone; the access portal, the operator
+  console and the node dashboard share one restrained visual system. The
+  portal hero, starter prompts and the console's metric labels were
+  rewritten for an audience evaluating infrastructure, not playing a game.
+- **CLI**: `kemi node`, `kemi app`, `kemi join`, `kemi web`, `kemi chat`,
+  `kemi demo`, `kemi learn` and `kemi doctor` all report in plain
+  operational language ("Node 'x' is online", "OK: this machine is ready to
+  run a Kemi node") instead of nautical announcements.
+- **Docs**: README, LAUNCH, TASKS, PLATFORMS, SPEC and the master prompt
+  were rewritten to the same register; every command, flag and technical
+  claim in them was verified unchanged against the source.
+
 ## 1.10.0 — The keeper's panel (harbor admin)
 - `/admin` on every harbor: a key-gated keeper's panel (key printed at
   `kemi web` start, or set with `--admin-key`), designed in scan order —

@@ -1,15 +1,15 @@
-"""``kemi web``: a public harbor — the fleet as a web app.
+"""``kemi web``: a public access portal — the network as a web app.
 
-Anyone opens the harbor's address in a browser, gets a small welcome
-allowance of credits, and chats with the fleet — no install, no account.
-Every answer is produced by another user's ship (never a central server)
-and is stamped with the ship, the model and the credits it cost. The
-harbor host's node pays the providers on the fleet ledger and meters each
-visitor's guest wallet by exactly what their questions cost.
+A visitor opens the portal address in a browser, receives a small
+starting credit allowance and queries the network — no install, no
+account. Every answer is produced by an independent provider node (never
+a central server) and is reported with the node, the model and the cost.
+The portal operator's node settles with providers on the network ledger
+and meters each visitor's allowance by exactly what their queries cost.
 
-Decentralisation is preserved one level up: a harbor is just a lens into
-the fleet, and anyone can open their own with ``kemi web`` — there can be
-as many harbors as there are captains willing to fund one.
+Decentralisation is preserved one level up: a portal is only a lens onto
+the network, and any operator can run their own with ``kemi web`` —
+there can be as many portals as there are operators willing to fund one.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def _now() -> float:
 
 
 class WebApp:
-    """A multi-visitor chat portal backed by one consumer node."""
+    """A multi-visitor query portal backed by one consumer node."""
 
     def __init__(self, node, host: str = "0.0.0.0", port: int = 8090,
                  faucet: float = 10.0, state_path: str | None = None,
@@ -70,7 +70,7 @@ class WebApp:
         self._server = await asyncio.start_server(self._handle, self.host, self.port)
         self.port = self._server.sockets[0].getsockname()[1]
         self._loops.append(asyncio.create_task(self._providers_loop()))
-        log.info("harbor open on http://%s:%s/", self.host, self.port)
+        log.info("access portal open on http://%s:%s/", self.host, self.port)
 
     async def stop(self) -> None:
         for task in self._loops:
@@ -96,10 +96,19 @@ class WebApp:
     # -- guest accounts ------------------------------------------------------
 
     def _load(self) -> None:
-        if not self.state_path or not os.path.exists(self.state_path):
+        if not self.state_path:
             return
+        path = self.state_path
+        if not os.path.exists(path):
+            # State was stored as harbor.json before the 1.11 rename; adopt it
+            # so an existing portal keeps its visitors across the upgrade.
+            legacy = os.path.join(os.path.dirname(path), "harbor.json")
+            if os.path.basename(path) != "harbor.json" and os.path.exists(legacy):
+                path = legacy
+            else:
+                return
         try:
-            with open(self.state_path, "r", encoding="utf-8") as fh:
+            with open(path, "r", encoding="utf-8") as fh:
                 saved = json.load(fh)
             for token, g in saved.get("guests", {}).items():
                 self._guests[token] = {
@@ -119,8 +128,7 @@ class WebApp:
                 self.faucet = float(saved["faucet"])
             self._asks.extend(list(saved.get("asks", []))[-ASKS_KEPT:])
         except (ValueError, OSError, TypeError):
-            log.warning("could not read harbor state at %s; starting fresh",
-                        self.state_path)
+            log.warning("could not read portal state at %s; starting fresh", path)
 
     def _save(self) -> None:
         if not self.state_path:
@@ -138,7 +146,7 @@ class WebApp:
                            "asks": list(self._asks)}, fh, ensure_ascii=False)
             os.replace(tmp, self.state_path)
         except OSError:
-            log.warning("could not persist harbor state to %s", self.state_path)
+            log.warning("could not persist portal state to %s", self.state_path)
 
     def _evict(self) -> None:
         while len(self._guests) > MAX_GUESTS:
@@ -146,7 +154,8 @@ class WebApp:
             del self._guests[idle["token"]]
 
     def _guest(self, token: str | None) -> dict[str, Any]:
-        """Resume a guest by token, or mint a new one with welcome credits."""
+        """Resume a visitor by token, or register a new one with the
+        starting allowance."""
         if token and token in self._guests:
             guest = self._guests[token]
             guest["seen"] = _now()
@@ -169,7 +178,7 @@ class WebApp:
     def _require_guest(self, token: str) -> dict[str, Any]:
         guest = self._guests.get(token or "")
         if guest is None:
-            raise PermissionError("unknown or expired guest token")
+            raise PermissionError("unknown or expired session")
         guest["seen"] = _now()
         return guest
 
@@ -188,17 +197,17 @@ class WebApp:
     def submit_ask(self, token: str, message: str) -> dict[str, Any]:
         guest = self._require_guest(token)
         if guest.get("banned"):
-            raise PermissionError("this guest has been banned by the harbor keeper")
+            raise PermissionError("this account has been suspended by the portal operator")
         message = str(message or "").strip()
         if not message or len(message) > MAX_MESSAGE:
             raise ValueError(f"message must be 1-{MAX_MESSAGE} characters")
         if guest["busy"]:
-            raise ValueError("a reply is already streaming; wait for it")
+            raise ValueError("a response is already in progress; please wait")
         if _now() - guest["last_ask"] < ASK_COOLDOWN:
-            raise ValueError("slow down a little, captain")
+            raise ValueError("too many requests; please wait a moment")
         if guest["balance"] <= 0:
-            raise ValueError("out of credits — join the fleet with your own "
-                             "ship to earn more (kemi app)")
+            raise ValueError("credit balance exhausted — run your own node to "
+                             "earn credits (pip install kemi && kemi app)")
         guest["busy"] = True
         guest["last_ask"] = _now()
         guest["live"] = ""
@@ -258,15 +267,15 @@ class WebApp:
             "fleet": self._fleet_summary(),
         }
 
-    # -- the harbor keeper's panel -------------------------------------------
+    # -- the operator console -------------------------------------------------
 
     def _check_admin(self, key: str) -> None:
         if not hmac.compare_digest(str(key or ""), self.admin_key):
             raise PermissionError("invalid admin key")
 
     def admin_state(self) -> dict[str, Any]:
-        """Everything the keeper's panel shows, in scan order: alerts and
-        headline tiles first, then economy, guests and fleet quality."""
+        """Everything the operator console shows, in scan order: alerts and
+        headline metrics first, then cost, users and provider quality."""
         node = self.node
         now = _now()
         balance = node.ledger.balance(node.identity.node_id)
@@ -283,19 +292,19 @@ class WebApp:
         alerts: list[dict[str, str]] = []
         if not self._providers_cache:
             alerts.append({"level": "critical",
-                           "text": "Filoda sağlayıcı görünmüyor — sorular cevapsız kalır."})
+                           "text": "Ağda sağlayıcı düğüm bulunamadı; sorgular yanıtsız kalacak."})
         if runway is not None and runway < 25:
             alerts.append({"level": "warning",
-                           "text": f"Bakiye yaklaşık {runway} soruluk — kredi kazanmak için "
-                                   "--provide açın ya da faucet'i kısın."})
+                           "text": f"Bakiye yaklaşık {runway} sorgu karşılıyor. Kredi kazanmak "
+                                   "için --provide etkinleştirin veya başlangıç kredisini düşürün."})
         if flagged:
             alerts.append({"level": "serious",
-                           "text": f"{len(flagged)} hesap çifte harcamadan işaretli."})
+                           "text": f"{len(flagged)} hesap çifte harcama nedeniyle işaretlendi."})
         if day and (sum(1 for a in day if not a["ok"]) / len(day)) > 0.2:
             alerts.append({"level": "warning",
-                           "text": "Son 24 saatte soruların %20'sinden fazlası cevapsız."})
+                           "text": "Son 24 saatte sorguların %20'sinden fazlası yanıtlanamadı."})
 
-        # hourly spend, oldest→newest, 24 buckets (the economy chart's series)
+        # hourly spend, oldest→newest, 24 buckets (the cost chart's series)
         buckets = [{"h": h, "spend": 0.0, "asks": 0} for h in range(24)]
         for a in day_ok:
             b = buckets[23 - min(23, int((now - a["ts"]) // 3600))]
@@ -350,11 +359,11 @@ class WebApp:
                            amount: float = 0.0) -> dict[str, Any]:
         guest = self._guests.get(token or "")
         if guest is None:
-            raise ValueError("no such guest")
+            raise ValueError("no such user")
         if action == "gift":
             amount = float(amount)
             if not 0 < amount <= 1000:
-                raise ValueError("gift must be between 0 and 1000 credits")
+                raise ValueError("credit grant must be between 0 and 1000")
             guest["balance"] = round(guest["balance"] + amount, 6)
         elif action == "ban":
             guest["banned"] = True
@@ -369,7 +378,7 @@ class WebApp:
     def admin_set_faucet(self, amount: float) -> dict[str, Any]:
         amount = float(amount)
         if not 0 <= amount <= 1000:
-            raise ValueError("faucet must be between 0 and 1000 credits")
+            raise ValueError("starting allowance must be between 0 and 1000 credits")
         self.faucet = amount
         self._save()
         return {"ok": True, "faucet": self.faucet}
@@ -480,7 +489,7 @@ _PAGE = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#060b16">
-<title>Kemi Limanı — merkezi olmayan yapay zekâ</title>
+<title>Kemi — dağıtık yapay zekâ ağı</title>
 <style>
   :root {
     --sea-deep:#060b16; --sea:#0b1424; --hull:#101c31; --hull-2:#0e1930;
@@ -504,8 +513,6 @@ _PAGE = r"""<!doctype html>
       radial-gradient(90rem 42rem at 50% -18rem, #172747 0%, transparent 60%),
       radial-gradient(50rem 26rem at 82% 108%, rgba(87,217,192,.07) 0%, transparent 65%),
       var(--sea-deep); }
-  .sky::after { content:""; position:absolute; left:0; right:0; top:34dvh; height:1px;
-    background:linear-gradient(90deg, transparent, rgba(231,183,95,.25), transparent); }
 
   header { display:flex; align-items:center; gap:12px;
     padding:14px clamp(14px, 4vw, 28px);
@@ -514,8 +521,10 @@ _PAGE = r"""<!doctype html>
     backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
     border-bottom:1px solid var(--edge-soft); }
   .brand { display:flex; align-items:baseline; gap:9px; }
-  .brand .anchor { color:var(--brass); font-size:19px; transform:translateY(1px); }
-  .brand .word { font:600 24px/1 var(--serif); letter-spacing:.02em; }
+  .brand .mark { width:11px; height:11px; border-radius:3px;
+    background:linear-gradient(150deg, var(--brass), var(--brass-deep));
+    align-self:center; }
+  .brand .word { font:700 21px/1 var(--sans); letter-spacing:-.01em; }
   .brand .port { font:400 13px/1 var(--sans); color:var(--mist);
     letter-spacing:.24em; text-transform:uppercase; }
   .chips { margin-left:auto; display:flex; gap:8px; align-items:center; }
@@ -537,8 +546,8 @@ _PAGE = r"""<!doctype html>
   /* hero — the harbor gate. Compacts once the conversation starts. */
   .hero { text-align:center; padding:clamp(30px, 7dvh, 64px) 8px 8px;
     transition:opacity .3s ease; }
-  .hero h1 { font:600 clamp(30px, 6vw, 42px)/1.15 var(--serif);
-    letter-spacing:.01em; text-wrap:balance; }
+  .hero h1 { font:700 clamp(28px, 5vw, 38px)/1.18 var(--sans);
+    letter-spacing:-.015em; text-wrap:balance; }
   .hero h1 em { font-style:normal; color:var(--brass); }
   .hero > p { margin:14px auto 0; max-width:34em; color:var(--mist);
     font-size:15.5px; text-wrap:pretty; }
@@ -645,9 +654,9 @@ _PAGE = r"""<!doctype html>
 <div class="sky" aria-hidden="true"></div>
 <header>
   <div class="brand">
-    <span class="anchor" aria-hidden="true">⚓</span>
+    <span class="mark" aria-hidden="true"></span>
     <span class="word">Kemi</span>
-    <span class="port" data-i18n="port">Limanı</span>
+    <span class="port" data-i18n="port">yapay zekâ ağı</span>
   </div>
   <div class="chips">
     <span class="pill" id="fleetpill" role="status">…</span>
@@ -658,16 +667,16 @@ _PAGE = r"""<!doctype html>
 <main>
   <section class="hero" id="hero">
     <h1 data-i18n="herohead">Merkezi olmayan <em>yapay zekâ</em></h1>
-    <p data-i18n="herobody">Sorunu bir şirketin sunucusu değil, filodaki başka
-    insanların gemileri cevaplar. Her cevabın altında hangi geminin, hangi modelle,
-    kaç krediye ürettiği yazılıdır — hoş geldin kredin hazır.</p>
+    <p data-i18n="herobody">Sorgularınız merkezi bir sunucuda değil, ağdaki bağımsız
+    sağlayıcı düğümlerde işlenir. Her yanıt; işlemi yapan düğüm, kullanılan model ve
+    maliyetiyle birlikte raporlanır. Başlangıç krediniz hesabınıza tanımlandı.</p>
     <div class="board" id="board" aria-label="fleet">
       <div class="cell"><div class="n live" id="bships">–</div>
-        <div class="l" data-i18n="bships">gemi çevrimiçi</div></div>
+        <div class="l" data-i18n="bships">sağlayıcı çevrimiçi</div></div>
       <div class="cell"><div class="n" id="bmodels">–</div>
         <div class="l" data-i18n="bmodels">model</div></div>
       <div class="cell"><div class="n gold" id="bprice">–</div>
-        <div class="l" data-i18n="bprice">kredi / soru</div></div>
+        <div class="l" data-i18n="bprice">kredi / sorgu</div></div>
     </div>
     <div class="starters" id="starters"></div>
   </section>
@@ -675,7 +684,7 @@ _PAGE = r"""<!doctype html>
 </main>
 <form id="askform" autocomplete="off">
   <div class="dock">
-    <input id="askmsg" data-i18n-ph="askph" placeholder="filoya bir şey sor…"
+    <input id="askmsg" data-i18n-ph="askph" placeholder="ağa bir sorgu yazın…"
            maxlength="2000" aria-label="message">
     <button id="askbtn" type="submit" aria-label="send" data-i18n-title="send">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -684,38 +693,38 @@ _PAGE = r"""<!doctype html>
       </svg>
     </button>
   </div>
-  <p class="note" data-i18n="note">cevaplar filodan gelir — merkezî sunucu yok ·
-    kendi gemin: <b>pip install kemi && kemi app</b></p>
+  <p class="note" data-i18n="note">yanıtlar ağdaki bağımsız düğümlerde üretilir ·
+    kendi düğümünüz: <b>pip install kemi && kemi app</b></p>
 </form>
 <script>
 const $ = s => document.querySelector(s);
 const esc = t => String(t).replace(/[&<>"']/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const I18N = {
-  tr: { port:'Limanı', credits:'kredi',
+  tr: { port:'yapay zekâ ağı', credits:'kredi',
         herohead:'Merkezi olmayan <em>yapay zekâ</em>',
-        herobody:'Sorunu bir şirketin sunucusu değil, filodaki başka insanların gemileri cevaplar. Her cevabın altında hangi geminin, hangi modelle, kaç krediye ürettiği yazılıdır — hoş geldin kredin hazır.',
-        bships:'gemi çevrimiçi', bmodels:'model', bprice:'kredi / soru',
-        askph:'filoya bir şey sor…', send:'gönder',
-        note:'cevaplar filodan gelir — merkezî sunucu yok · kendi gemin: <b>pip install kemi && kemi app</b>',
-        ships:n=>`${n} gemi çevrimiçi`, noships:'filo aranıyor…',
-        via:(c,s,m)=>`${c} kr — ${s}${m ? ' — ' + m : ''}`,
-        thinking:'filo düşünüyor', starters:[
-          'Kemi nasıl çalışıyor, kim cevap veriyor?',
-          'Bana kısa bir deniz hikâyesi anlat',
-          'Kredi sistemi neden adil?' ] },
-  en: { port:'Harbor', credits:'credits',
+        herobody:'Sorgularınız merkezi bir sunucuda değil, ağdaki bağımsız sağlayıcı düğümlerde işlenir. Her yanıt; işlemi yapan düğüm, kullanılan model ve maliyetiyle birlikte raporlanır. Başlangıç krediniz hesabınıza tanımlandı.',
+        bships:'sağlayıcı çevrimiçi', bmodels:'model', bprice:'kredi / sorgu',
+        askph:'ağa bir sorgu yazın…', send:'gönder',
+        note:'yanıtlar ağdaki bağımsız düğümlerde üretilir · kendi düğümünüz: <b>pip install kemi && kemi app</b>',
+        ships:n=>`${n} sağlayıcı çevrimiçi`, noships:'ağ taranıyor…',
+        via:(c,s,m)=>`${c} kredi · düğüm ${s}${m ? ' · model ' + m : ''}`,
+        thinking:'sorgu işleniyor', starters:[
+          'Bu ağ nasıl çalışıyor, sorguma kim yanıt veriyor?',
+          'Verilerim nasıl korunuyor?',
+          'Ücretlendirme modeli nasıl işliyor?' ] },
+  en: { port:'intelligence network', credits:'credits',
         herohead:'Decentralised <em>intelligence</em>',
-        herobody:'Your question is answered by other people’s ships in the fleet, not a company server. Every answer is stamped with the ship, the model and the credits it cost — your welcome credits are ready.',
-        bships:'ships online', bmodels:'models', bprice:'credits / ask',
-        askph:'ask the fleet anything…', send:'send',
-        note:'answers come from the fleet — no central server · your own ship: <b>pip install kemi && kemi app</b>',
-        ships:n=>`${n} ships online`, noships:'searching the fleet…',
-        via:(c,s,m)=>`${c} cr — ${s}${m ? ' — ' + m : ''}`,
-        thinking:'the fleet is thinking', starters:[
-          'How does Kemi work — who answers me?',
-          'Tell me a short sea story',
-          'Why is the credit system fair?' ] },
+        herobody:'Your queries are processed by independent provider nodes on the network, not a central server. Every answer is reported with the node that produced it, the model used and its cost. Your starting credits are on your account.',
+        bships:'providers online', bmodels:'models', bprice:'credits / query',
+        askph:'type a query for the network…', send:'send',
+        note:'answers are produced by independent nodes on the network · run your own: <b>pip install kemi && kemi app</b>',
+        ships:n=>`${n} providers online`, noships:'scanning the network…',
+        via:(c,s,m)=>`${c} credits · node ${s}${m ? ' · model ' + m : ''}`,
+        thinking:'processing the query', starters:[
+          'How does this network work — who answers my query?',
+          'How is my data protected?',
+          'How does the pricing model work?' ] },
 };
 let LANG = localStorage.getItem('kemi-harbor-lang') || 'tr';
 function applyLang() {
@@ -770,7 +779,7 @@ function render() {
   fleetBoard(STATE.fleet);
   document.body.classList.toggle('sailing',
     STATE.log.length > 0 || STATE.busy);
-  const av = `<div class="avatar" aria-hidden="true">⚓</div>`;
+  const av = `<div class="avatar" aria-hidden="true">K</div>`;
   const rows = STATE.log.map(m => {
     if (m.role === 'you')
       return `<div class="msg you"><div class="bubble">${esc(m.text)}</div></div>`;
@@ -779,7 +788,7 @@ function render() {
     const stamp = d.via((m.cost ?? 0).toFixed(2), esc(m.ship || ''),
                         m.model && m.model !== 'mock' ? esc(m.model) : '');
     return `<div class="msg fleet">${av}<div class="bubble">${esc(m.text)}` +
-           `<div class="stamp"><span class="coin">◈</span><b>${stamp}</b></div></div></div>`;
+           `<div class="stamp"><b>${stamp}</b></div></div></div>`;
   });
   if (STATE.busy) rows.push(`<div class="msg fleet">${av}<div class="bubble typing">` +
     (STATE.live ? esc(STATE.live) + '<span class="cursor"></span>'
@@ -833,7 +842,7 @@ _ADMIN = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#060b16">
-<title>Kemi Limanı — kaptan köşkü</title>
+<title>Kemi — operatör konsolu</title>
 <style>
   :root {
     --sea-deep:#060b16; --sea:#0b1424; --hull:#101c31; --hull-2:#0e1930;
@@ -853,7 +862,7 @@ _ADMIN = r"""<!doctype html>
     border-bottom:1px solid var(--edge-soft); position:sticky; top:0; z-index:5;
     background:color-mix(in srgb, var(--sea-deep) 84%, transparent);
     backdrop-filter:blur(10px); }
-  header .word { font:600 21px/1 var(--serif); }
+  header .word { font:700 19px/1 var(--sans); letter-spacing:-.01em; }
   header .sub { font:11px var(--mono); color:var(--faint);
     letter-spacing:.2em; text-transform:uppercase; }
   header .ship { margin-left:auto; font:12px var(--mono); color:var(--mist); }
@@ -861,7 +870,7 @@ _ADMIN = r"""<!doctype html>
     display:flex; flex-direction:column; gap:16px; }
   .gate { max-width:420px; margin:12dvh auto; background:var(--hull);
     border:1px solid var(--edge); border-radius:16px; padding:26px; }
-  .gate h1 { font:600 20px var(--serif); margin-bottom:8px; }
+  .gate h1 { font:700 18px var(--sans); letter-spacing:-.01em; margin-bottom:8px; }
   .gate p { color:var(--mist); font-size:13px; margin-bottom:14px; }
   .gate .row { display:flex; gap:8px; }
   .gate input { flex:1; }
@@ -932,16 +941,17 @@ _ADMIN = r"""<!doctype html>
 <body>
 <header>
   <span class="word">Kemi</span>
-  <span class="sub">kaptan köşkü</span>
+  <span class="sub">operatör konsolu</span>
   <span class="ship" id="shipname"></span>
 </header>
 <main id="app">
   <div class="gate" id="gate">
-    <h1>⚓ Kaptan köşkü</h1>
-    <p>Bu panel limanın sahibine aittir. <code>kemi web</code> başlarken
-       terminalde yazan yönetici anahtarını girin.</p>
+    <h1>Operatör konsolu</h1>
+    <p>Bu konsol yalnızca portal operatörüne açıktır. <code>kemi web</code>
+       başlatılırken terminalde görüntülenen yönetici anahtarını girin.</p>
     <div class="row">
-      <input id="keyinput" placeholder="yönetici anahtarı" aria-label="admin key">
+      <input id="keyinput" type="password" placeholder="yönetici anahtarı"
+             aria-label="admin key">
       <button id="keybtn">giriş</button>
     </div>
   </div>
@@ -951,7 +961,7 @@ const $ = s => document.querySelector(s);
 const esc = t => String(t).replace(/[&<>"']/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let KEY = localStorage.getItem('kemi-admin-key') || '';
-const ICONS = { warning:'▲', serious:'✖', critical:'✖', okay:'●' };
+const ICONS = { warning:'▲', serious:'×', critical:'×', okay:'●' };
 const ago = s => s < 90 ? `${s} sn` : s < 5400 ? `${Math.round(s/60)} dk`
                 : s < 129600 ? `${Math.round(s/3600)} sa` : `${Math.round(s/86400)} g`;
 
@@ -968,25 +978,25 @@ $('#keybtn') && ($('#keybtn').onclick = () => {
 function tiles(t) {
   const cell = (n, l, cls='', extra='') =>
     `<div class="tile"><div class="n ${cls}">${n}${extra}</div><div class="l">${l}</div></div>`;
-  return `<section><h2>komuta özeti</h2><div class="tiles">` +
-    cell(t.balance.toFixed(2), 'liman bakiyesi (kredi)', 'gold') +
-    cell(t.spent24.toFixed(2), 'filoya ödenen · 24 sa', 'gold') +
-    cell(t.asks24 + (t.failed24 ? ` <small>(${t.failed24} cevapsız)</small>` : ''),
-         'soru · 24 sa', t.failed24 > 0 ? 'bad' : '') +
-    cell(t.guests24 + ` <small>/ ${t.guests_total}</small>`, 'aktif ziyaretçi · 24 sa', 'live') +
-    cell(t.runway != null ? '≈' + t.runway : '—', 'kalan soru (tahmin)',
+  return `<section><h2>genel bakış</h2><div class="tiles">` +
+    cell(t.balance.toFixed(2), 'portal bakiyesi (kredi)', 'gold') +
+    cell(t.spent24.toFixed(2), 'sağlayıcılara ödenen · 24 sa', 'gold') +
+    cell(t.asks24 + (t.failed24 ? ` <small>(${t.failed24} başarısız)</small>` : ''),
+         'sorgu · 24 sa', t.failed24 > 0 ? 'bad' : '') +
+    cell(t.guests24 + ` <small>/ ${t.guests_total}</small>`, 'aktif kullanıcı · 24 sa', 'live') +
+    cell(t.runway != null ? '≈' + t.runway : '—', 'kalan sorgu (tahmini)',
          t.runway != null && t.runway < 25 ? 'bad' : '') +
-    cell(t.providers, 'gemi çevrimiçi', t.providers ? 'live' : 'bad') +
-    `</div><div class="faucetrow">hoş geldin kredisi (faucet):
+    cell(t.providers, 'sağlayıcı çevrimiçi', t.providers ? 'live' : 'bad') +
+    `</div><div class="faucetrow">başlangıç kredisi:
       <input id="faucet" type="number" min="0" max="1000" step="0.5" value="${t.faucet}">
       <button id="faucetbtn">kaydet</button>
-      <span class="muted">yeni ziyaretçilere verilir · DHT: ${t.dht} bağlantı</span>
+      <span class="muted">yeni kullanıcılara tanımlanır · DHT: ${t.dht} bağlantı</span>
     </div></section>`;
 }
 
 function alerts(list) {
   if (!list.length)
-    list = [{level:'okay', text:'Her şey yolunda — liman sakin, filo cevap veriyor.'}];
+    list = [{level:'okay', text:'Sistem normal çalışıyor; sağlayıcılar yanıt veriyor.'}];
   return `<section><h2>durum</h2><div class="alerts">` + list.map(a =>
     `<div class="alert ${a.level}"><span>${ICONS[a.level] || '●'}</span>` +
     `<span>${esc(a.text)}</span></div>`).join('') + `</div></section>`;
@@ -1021,17 +1031,17 @@ function chart(series) {
               font-size="10" fill="#5f6d8c" font-family="ui-monospace,Menlo"
               >${String(d.getHours()).padStart(2,'0')}:00</text>`;
   }).join('');
-  return `<section><h2>ekonomi — saatlik filo ödemesi (kredi, son 24 sa)</h2>
+  return `<section><h2>maliyet — saatlik sağlayıcı ödemesi (kredi, son 24 sa)</h2>
     <div class="chartwrap">
       <svg id="chart" viewBox="0 0 ${W} ${H}" role="img"
-        aria-label="saatlik harcama grafiği">${grid}${bars}${labels}</svg>
+        aria-label="saatlik sağlayıcı ödemesi grafiği">${grid}${bars}${labels}</svg>
       <div id="tip"></div>
     </div></section>`;
 }
 
 function guests(rows) {
   const body = rows.length ? rows.map(g => `<tr>
-    <td>⚓ ${esc(g.name)} ${g.banned ? '<span class="pill bad">✖ engelli</span>' : ''}</td>
+    <td>${esc(g.name)} ${g.banned ? '<span class="pill bad">× engelli</span>' : ''}</td>
     <td class="num">${g.balance.toFixed(2)}</td>
     <td class="num">${g.spent.toFixed(2)}</td>
     <td class="num">${g.asks}</td>
@@ -1041,16 +1051,16 @@ function guests(rows) {
       <button class="ghost" data-act="${g.banned ? 'unban' : 'ban'}"
         data-t="${esc(g.token)}">${g.banned ? 'engeli kaldır' : 'engelle'}</button>
     </td></tr>`).join('')
-    : `<tr><td colspan="6" class="muted">henüz ziyaretçi yok — liman adresini paylaşın</td></tr>`;
-  return `<section><h2>ziyaretçiler</h2><table>
-    <thead><tr><th>misafir</th><th>bakiye</th><th>harcadı</th><th>soru</th>
-    <th>son görülme</th><th>eylem</th></tr></thead>
+    : `<tr><td colspan="6" class="muted">henüz kullanıcı yok — portal adresini paylaşın</td></tr>`;
+  return `<section><h2>kullanıcılar</h2><table>
+    <thead><tr><th>kullanıcı</th><th>bakiye</th><th>harcama</th><th>sorgu</th>
+    <th>son etkinlik</th><th>işlem</th></tr></thead>
     <tbody>${body}</tbody></table></section>`;
 }
 
 function fleet(rows, flagged) {
   const body = rows.length ? rows.map(f => `<tr>
-    <td>⚓ ${esc(f.ship)}</td>
+    <td>${esc(f.ship)}</td>
     <td>${f.model !== 'mock' && f.model !== '—'
           ? `<span class="pill good">● ${esc(f.model)}</span>`
           : `<span class="pill">○ ${esc(f.model)}</span>`}</td>
@@ -1059,19 +1069,19 @@ function fleet(rows, flagged) {
     <td class="num">${f.good} <span class="muted">/</span> ${f.bad}</td>
     <td>${f.stream ? '<span class="pill good">● akış</span>'
                    : '<span class="pill warn">▲ akış yok</span>'}</td></tr>`).join('')
-    : `<tr><td colspan="6" class="muted">filo boş görünüyor</td></tr>`;
+    : `<tr><td colspan="6" class="muted">ağda sağlayıcı bulunamadı</td></tr>`;
   const flagRow = flagged.length
-    ? `<p style="margin-top:10px" class="muted">✖ işaretli hesaplar: ${flagged.map(esc).join(', ')}</p>` : '';
-  return `<section><h2>filo kalitesi</h2><table>
-    <thead><tr><th>gemi</th><th>model</th><th>kredi/soru</th><th>itibar</th>
-    <th>iyi / kötü</th><th>yetenek</th></tr></thead>
+    ? `<p style="margin-top:10px" class="muted">× işaretli hesaplar: ${flagged.map(esc).join(', ')}</p>` : '';
+  return `<section><h2>sağlayıcı kalitesi</h2><table>
+    <thead><tr><th>düğüm</th><th>model</th><th>kredi/sorgu</th><th>itibar</th>
+    <th>başarılı / hatalı</th><th>yetenek</th></tr></thead>
     <tbody>${body}</tbody></table>${flagRow}</section>`;
 }
 
 let STATE = null;
 function render() {
   const s = STATE;
-  $('#shipname').textContent = '⚓ ' + s.ship;
+  $('#shipname').textContent = 'düğüm: ' + s.ship;
   $('#app').innerHTML = alerts(s.alerts) + tiles(s.tiles) + chart(s.series) +
                         guests(s.guests) + fleet(s.fleet, s.flagged);
   $('#faucetbtn').onclick = async () => {
@@ -1091,8 +1101,8 @@ function render() {
     const b = STATE.series[+t.dataset.i];
     const back = 23 - (+t.dataset.i);
     const d = new Date(Date.now() - back * 3600e3);
-    tip.textContent = `${String(d.getHours()).padStart(2,'0')}:00 — ` +
-      `${b.spend.toFixed(2)} kr · ${b.asks} soru`;
+    tip.textContent = `${String(d.getHours()).padStart(2,'0')}:00 · ` +
+      `${b.spend.toFixed(2)} kredi · ${b.asks} sorgu`;
     const r = svg.getBoundingClientRect();
     tip.style.display = 'block';
     tip.style.left = Math.max(0, Math.min(ev.clientX - r.left + 12, r.width - 190)) + 'px';

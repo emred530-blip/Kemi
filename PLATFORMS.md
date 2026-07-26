@@ -1,22 +1,22 @@
 # Running Kemi everywhere — iOS, Android, macOS, Windows, Linux
 
-Kemi has two roles, and which platforms can play which is shaped by what each
-OS actually allows. The honest map:
+Kemi has two roles. Which platforms can fill which role is determined by what
+each OS allows. The support matrix:
 
 | Platform | Full node (provider/peer) | Client (chat, submit jobs, watch) |
 |---|---|---|
-| **Linux**   | ✅ native (`pip` / Docker / installer) | ✅ browser / PWA |
-| **macOS**   | ✅ native (`pip` / installer / `.app`) | ✅ browser / PWA |
-| **Windows** | ✅ native (`pip` / PowerShell / `.exe`) | ✅ browser / PWA |
-| **Android** | ⚠️ via Termux (advanced) | ✅ **PWA** (install from browser) |
-| **iOS**     | ❌ not allowed (OS sandbox) | ✅ **PWA** (Add to Home Screen) |
+| **Linux**   | Yes — native (`pip` / Docker / installer) | Yes — browser / PWA |
+| **macOS**   | Yes — native (`pip` / installer / `.app`) | Yes — browser / PWA |
+| **Windows** | Yes — native (`pip` / PowerShell / `.exe`) | Yes — browser / PWA |
+| **Android** | Limited — via Termux (advanced) | Yes — **PWA** (install from browser) |
+| **iOS**     | No — not allowed (OS sandbox) | Yes — **PWA** (Add to Home Screen) |
 
 **Why not a full node on phones?** A Kemi node is a long-running process that
 listens on TCP+UDP sockets and runs a Kademlia DHT. iOS forbids background
 daemons and arbitrary sockets for App Store apps; Android allows it only with
 heavy battery/background caveats. Phones are also rarely good 24/7 providers.
-So the right design is: **desktops/servers run nodes; phones and browsers are
-thin clients** that use a fleet over its HTTP API.
+The design follows from this: **desktops and servers run nodes; phones and
+browsers are thin clients** that reach the network over its HTTP API.
 
 ## The client that runs on all five: the PWA
 
@@ -27,12 +27,12 @@ device, open the dashboard URL and install it:
 - **Android (Chrome):** menu → *Install app* / *Add to Home Screen*.
 - **Desktop (Chrome/Edge):** the install icon in the address bar.
 
-It's offline-tolerant (a service worker caches the shell), mobile-responsive,
-and talks to the fleet through `/api/*`. From your phone you can chat with the
-fleet's AI, submit jobs, watch providers and invite friends — the heavy
-compute runs on the fleet's desktop/server ships.
+It is offline-tolerant (a service worker caches the shell), mobile-responsive,
+and talks to the network through `/api/*`. From a phone you can chat with the
+network's AI, submit jobs, monitor providers and invite others. The heavy
+compute runs on the network's desktop and server nodes.
 
-Point a phone at a desktop ship on the same Wi-Fi:
+Point a phone at a desktop node on the same Wi-Fi:
 `kemi node --ui 8080 --ui-host 0.0.0.0` then browse to
 `http://<desktop-ip>:8080` from the phone and install it.
 
@@ -49,7 +49,7 @@ irm https://raw.githubusercontent.com/emred530-blip/Kemi/main/scripts/install.ps
 pip install kemi          # then: kemi app
 ```
 
-### No Python at all? Standalone desktop apps
+### Standalone desktop apps (no Python required)
 
 Build a self-contained app (bundles Python) with PyInstaller, per OS:
 
@@ -65,13 +65,13 @@ platform developer certificates.)
 ### Servers
 
 ```bash
-docker compose up        # a containerised fleet
+docker compose up        # a containerised network
 kemi service             # systemd (Linux) / launchd (macOS) auto-start unit
 ```
 
 ## Android full node (advanced, optional)
 
 Inside [Termux](https://termux.dev): `pkg install python`, then
-`pip install kemi` and `kemi node --provide`. Works, but Android battery and
-background limits make a phone a poor always-on provider — prefer the PWA
-client for phones.
+`pip install kemi` and `kemi node --provide`. This works, but Android battery
+and background limits make a phone a poor always-on provider. Use the PWA
+client on phones instead.

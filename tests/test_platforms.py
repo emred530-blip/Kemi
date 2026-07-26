@@ -74,8 +74,8 @@ class DashboardI18nTests(unittest.TestCase):
         from kemi.webui import _PAGE
 
         self.assertIn("I18N", _PAGE)
-        self.assertIn("filo paneli", _PAGE)   # Turkish
-        self.assertIn("fleet panel", _PAGE)    # English
+        self.assertIn("düğüm paneli", _PAGE)   # Turkish
+        self.assertIn("node panel", _PAGE)     # English
         self.assertIn('data-i18n="providers"', _PAGE)
         self.assertIn("langbtn", _PAGE)
 

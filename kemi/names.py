@@ -1,10 +1,10 @@
-"""Ship names and ranks: Kemi's character layer.
+"""Human-readable node names and contribution tiers.
 
-"Kemi" is an old Turkish word for ship - so every node IS a ship. Instead
-of asking humans to recognise hex digests, each node gets a deterministic,
-memorable ship name derived from its node id ("swift-gull-42"), and earns
-naval ranks as it contributes compute to the fleet. Names and ranks are
-pure presentation: the protocol still speaks node ids.
+Recognising 64-character hex digests is impractical, so every node also
+gets a deterministic, memorable name derived from its id
+("swift-gull-42"), and a contribution tier that reflects how much compute
+it has served the network. Names and tiers are presentation only: the
+protocol always speaks node ids.
 """
 
 from __future__ import annotations
@@ -25,14 +25,15 @@ ANIMALS = [
     "beaver", "marten", "otter", "turtle", "eel", "mullet", "bluefish", "anchovy",
 ]
 
-# (minimum earned credits, title, insignia)
+# Contribution tiers: (minimum credits earned, title, marker). A node's tier
+# is a plain record of how much compute it has actually served the network.
 RANKS = [
-    (0.0, "Cabin Boy", "·"),
-    (25.0, "Deckhand", "⚓"),
-    (100.0, "Helmsman", "⚓⚓"),
-    (300.0, "First Mate", "⚓⚓⚓"),
-    (1000.0, "Captain", "★"),
-    (5000.0, "Admiral", "★★"),
+    (0.0, "Unranked", "·"),
+    (25.0, "Contributor", "▪"),
+    (100.0, "Established", "▪▪"),
+    (300.0, "Trusted", "▪▪▪"),
+    (1000.0, "Principal", "◆"),
+    (5000.0, "Core", "◆◆"),
 ]
 
 
@@ -58,10 +59,6 @@ def rank_for(earned: float) -> tuple[str, str, float | None]:
 
 
 BANNER = r"""
-       ~        ~    K E M I    ~        ~
-            __|__    the open sea of compute
-        ____\___/____
-        \  ⚙  ⚙  ⚙  /
-         \__________/
-  ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
+  ██  K E M I
+  ██  decentralised compute and AI network
 """

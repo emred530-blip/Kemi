@@ -30,23 +30,23 @@ async def _pause(fast: bool) -> None:
 
 async def run_tutorial(fast: bool = False) -> int:
     _say(BANNER)
-    _say("  Welcome aboard! This 5-step tour teaches Kemi on a real, working")
-    _say("  fleet - everything happens locally on your machine, right now.")
+    _say("  This 5-step tour explains Kemi on a real, working network —")
+    _say("  everything below runs locally on your machine, right now.")
     await _pause(fast)
 
     # ------------------------------------------------------------ 1: identity
-    _say("STEP 1/5 — Your identity: your ship")
+    _say("STEP 1/5 — Your identity")
     identity = Identity.create()
     name = ship_name(identity.node_id)
     _say("  An Ed25519 keypair was generated for you, plus a small proof-of-work")
     _say("  (minting identities must not be free - that is the Sybil defence).")
-    _say(f"  Your ship:  {name}")
-    _say(f"  Your id:    {identity.node_id[:24]}… (the ship name derives from it)")
-    _say("  Every new ship launches with 100 credits in its hold.")
+    _say(f"  Node name: {name}")
+    _say(f"  Node id:   {identity.node_id[:24]}… (the name derives from it)")
+    _say("  Every new node starts with 100 credits.")
     await _pause(fast)
 
     # ------------------------------------------------------------ 2: fleet
-    _say("STEP 2/5 — Launching a fleet (no centre!)")
+    _say("STEP 2/5 — Starting a network (no central component)")
     bootstrap = PeerNode(Identity.create(), host="127.0.0.1", port=0)
     await bootstrap.start()
     peers = [("127.0.0.1", bootstrap.port)]
@@ -59,17 +59,17 @@ async def run_tutorial(fast: bool = False) -> int:
     my_node = PeerNode(identity, host="127.0.0.1", port=0, bootstrap=peers)
     await my_node.start()
     consumer = Consumer(my_node)
-    _say("  3 ships set sail and found each other over the Kademlia DHT:")
+    _say("  3 nodes started and discovered each other over the Kademlia DHT:")
     for node, role in ((bootstrap, "ordinary peer"), (p1, "provider, 0.5 cr/item"),
                        (p2, "provider, 1.0 cr/item")):
-        _say(f"    ⚓ {ship_name(node.identity.node_id):24s} {role}")
-    _say("  None of them is a 'server' - the first ship is merely first.")
+        _say(f"    {ship_name(node.identity.node_id):24s} {role}")
+    _say("  None of them is a 'server' - the first node is merely first.")
     await _pause(fast)
 
     # ------------------------------------------------------------ 3: market
     _say("STEP 3/5 — The compute market")
     found = await consumer.list_providers("hash.sha256")
-    _say("  Your ship asked the DHT: 'who can run hash.sha256?'")
+    _say("  This node asked the DHT: 'who can run hash.sha256?'")
     for record in found:
         _say(f"    {ship_name(record['node_id']):24s} {record['price']:.2f} credits/item"
              f"  [e2e encrypted{', streaming' if record.get('stream') else ''}]")
@@ -82,7 +82,7 @@ async def run_tutorial(fast: bool = False) -> int:
     report = await consumer.run_job(Job(task="hash.sha256", items=items,
                                         chunk_size=2, redundancy=2))
     _say("  An 8-item job was split into 4 chunks; redundancy=2 ran every chunk")
-    _say("  on two SEPARATE ships and cross-checked the results (majority wins).")
+    _say("  on two SEPARATE nodes and cross-checked the results (majority wins).")
     _say("  Payment: a per-chunk Ed25519-signed credit transfer - no escrow,")
     _say(f"  no middleman. Spent: {report.spent:.2f} credits"
          f" (all of it end-to-end encrypted: {report.encrypted_chunks} chunks).")
@@ -104,15 +104,15 @@ async def run_tutorial(fast: bool = False) -> int:
     _say("   your provider with `--ai-backend ollama --ai-model llama3.2`.)")
     earned_p1 = p1.ledger.total_earned(p1.identity.node_id)
     title, insignia, nxt = rank_for(earned_p1)
-    _say(f"\n  Ships climb ranks as they earn: {ship_name(p1.identity.node_id)}")
+    _say(f"\n  Nodes advance tiers as they earn: {ship_name(p1.identity.node_id)}")
     _say(f"  is now {insignia} {title} ({earned_p1:.0f} credits earned"
          + (f"; next rank at {nxt:.0f})." if nxt else ")."))
     await _pause(fast)
 
     # ------------------------------------------------------------ wrap-up
     invite = make_invite([("THIS-MACHINES-IP", 7700)], note="example")
-    _say("THAT'S ALL! To set sail for real:")
-    _say("  • Start a fleet:    kemi node --port 7700 --lan")
+    _say("Next steps — run this for real:")
+    _say("  • Start a network:  kemi node --port 7700 --lan")
     _say("  • Invite a friend:  kemi invite --peer IP:7700")
     _say(f"      (codes look like: {invite[:40]}…)")
     _say("  • Join with a code: kemi join --invite CODE")
