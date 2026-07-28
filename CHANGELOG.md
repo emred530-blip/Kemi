@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.11.1 — One-command stack
+- `scripts/start-stack.sh` brings up a complete deployment — bootstrap node,
+  provider node with dashboard, public access portal with its operator
+  console, and the OpenAI-compatible gateway — waits for each port to
+  accept connections, and prints every address plus the generated admin
+  key. `stop` tears the whole stack down. Tunable through `BIND`,
+  `PORTAL_PORT`, `FAUCET`, `ADMIN_KEY`, `AI_BACKEND`, `AI_MODEL` and
+  `STACK_HOME`; `BIND=0.0.0.0 AI_BACKEND=ollama AI_MODEL=… ` is the
+  go-live invocation.
+- LAUNCH.md documents it as step 1b.
+
 ## 1.11.0 — Professional positioning
 Kemi is infrastructure, and the interface now reads like it. The maritime
 metaphor that ran through the product (ships, fleets, harbors, captains,

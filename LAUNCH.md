@@ -29,6 +29,27 @@ EOF
 Aynı makinede çok düğümlü küçük bir ağ görmek için: `kemi demo`
 (veya rehberli tur: `kemi learn`).
 
+## 1b. Tüm sistemi tek komutla başlatma
+
+Dört bileşeni (önyükleme düğümü, sağlayıcı düğüm, erişim portalı, OpenAI
+uyumlu geçit) tek seferde ayağa kaldırmak için:
+
+```sh
+scripts/start-stack.sh          # başlat — adresleri ve yönetici anahtarını yazar
+scripts/start-stack.sh stop     # hepsini durdur
+```
+
+Ortam değişkenleriyle ayarlanır: `BIND` (varsayılan `127.0.0.1`; internete
+açmak için `0.0.0.0`), `PORTAL_PORT`, `FAUCET`, `ADMIN_KEY`, `AI_BACKEND`,
+`AI_MODEL`, `STACK_HOME`. Gerçek bir modelle yayına almak için:
+
+```sh
+BIND=0.0.0.0 AI_BACKEND=ollama AI_MODEL=llama3.2 scripts/start-stack.sh
+```
+
+Günlükler `~/.kemi-stack/run/*.log` altındadır. Betik her bileşenin portunu
+dinlemeye başlamasını bekler; biri kalkmazsa hata verip durur.
+
 ## 2. Evdeki ağ (LAN) — telefon ve diğer bilgisayarlar
 
 - İkinci bilgisayarda: `kemi join` — sihirbaz LAN'daki düğümü çok noktaya
