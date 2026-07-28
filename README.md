@@ -42,7 +42,9 @@ operational maturity — result caching, Prometheus metrics, dynamic pricing, a
 public access portal (`kemi web`) with its operator console, a self-training
 synapse network that ranks providers from observed outcomes, voice commands,
 and — in **v1.11** — the professional terminology used throughout this
-document.
+document. **v1.12** puts it on the open internet: one-command server
+deployment with hardened systemd units, an nginx/TLS reverse proxy and the
+abuse controls a public portal needs ([DEPLOY.md](DEPLOY.md)).
 
 ```
             ╭───────────────  DISCOVERY: Kademlia DHT (UDP)  ───────────────╮

@@ -1,0 +1,44 @@
+[Unit]
+Description=Kemi OpenAI-compatible API gateway
+Documentation=https://github.com/emred530-blip/kemi/blob/main/DEPLOY.md
+After=network-online.target kemi-node.service
+Wants=network-online.target kemi-node.service
+
+[Service]
+Type=exec
+User=kemi
+Group=kemi
+EnvironmentFile=/etc/kemi/kemi.env
+Environment=KEMI_HOME=/var/lib/kemi/gateway
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/kemi/bin/kemi-launch gateway
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+
+# --- confinement ---------------------------------------------------------
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ReadWritePaths=/var/lib/kemi/gateway
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

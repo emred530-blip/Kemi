@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import socket
 import tempfile
 import unittest
 import urllib.error
@@ -159,6 +160,120 @@ class AccessPortalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(app._guests["tok"]["balance"], 3.5)
         self.assertEqual(app._guests["tok"]["name"], "old-node-1")
         self.assertEqual(app.faucet, 7.0)
+
+
+class PublicHostingTests(unittest.IsolatedAsyncioTestCase):
+    """What changes once the portal is reachable from the open internet."""
+
+    async def asyncSetUp(self):
+        self.nodes: list[PeerNode] = []
+        self.bootstrap = await self._spawn()
+        self.peers = [("127.0.0.1", self.bootstrap.port)]
+        self.host_node = await self._spawn()
+        self.app = WebApp(self.host_node, host="127.0.0.1", port=0, faucet=5.0,
+                          admin_key="test-key", guests_per_ip=2)
+        await self.app.start()
+        self.base = f"http://127.0.0.1:{self.app.port}"
+
+    async def asyncTearDown(self):
+        await self.app.stop()
+        for node in self.nodes:
+            await node.stop()
+
+    async def _spawn(self, **kwargs) -> PeerNode:
+        node = PeerNode(Identity.create(difficulty=DIFF), host="127.0.0.1", port=0,
+                        bootstrap=getattr(self, "peers", None) or [],
+                        difficulty=DIFF, sandbox=False, **kwargs)
+        await node.start()
+        self.nodes.append(node)
+        return node
+
+    async def test_faucet_cannot_be_farmed_from_one_address(self):
+        for _ in range(2):
+            status, guest = await asyncio.to_thread(
+                _post, self.base + "/api/hello", {})
+            self.assertEqual(status, 200)
+            self.assertEqual(guest["balance"], 5.0)
+        try:
+            status, body = await asyncio.to_thread(
+                _post, self.base + "/api/hello", {})
+        except urllib.error.HTTPError as exc:
+            status, body = exc.code, json.loads(exc.read())
+        self.assertEqual(status, 429)
+        self.assertIn("too many sessions", body["error"])
+        # visitors who already hold a token are never turned away
+        token = list(self.app._guests)[0]
+        _, resumed = await asyncio.to_thread(
+            _post, self.base + "/api/hello", {"token": token})
+        self.assertEqual(resumed["token"], token)
+
+    async def test_accounts_carry_an_origin_tag_but_never_an_address(self):
+        await asyncio.to_thread(_post, self.base + "/api/hello", {})
+        _, state = await asyncio.to_thread(
+            _get, self.base + "/admin/api/state?key=test-key")
+        row = state["guests"][0]
+        self.assertEqual(len(row["origin"]), 8)
+        self.assertNotIn("127.0.0.1", json.dumps(state))
+
+    async def test_forwarded_address_is_only_believed_behind_a_proxy(self):
+        headers = {"x-forwarded-for": "203.0.113.9, 10.0.0.2"}
+
+        class _Writer:
+            def get_extra_info(self, _name):
+                return ("198.51.100.7", 51234)
+
+        writer = _Writer()
+        self.assertEqual(self.app._client_ip(writer, headers), "198.51.100.7")
+        self.app.trust_proxy = True
+        # the rightmost hop is the one our own proxy appended; the forged
+        # entry to its left is ignored
+        self.assertEqual(self.app._client_ip(writer, headers), "10.0.0.2")
+        self.assertEqual(self.app._client_ip(writer, {"x-real-ip": "203.0.113.5"}),
+                         "203.0.113.5")
+
+    async def test_the_cap_follows_the_forwarded_client_behind_a_proxy(self):
+        # Same socket peer for every request — as it is behind nginx — so the
+        # cap has to key on the forwarded address or one visitor exhausts it
+        # for everybody.
+        self.app.trust_proxy = True
+
+        def hello(forwarded: str) -> int:
+            body = b"{}"
+            request = (
+                f"POST /api/hello HTTP/1.1\r\nHost: kemi.test\r\n"
+                f"X-Forwarded-For: 203.0.113.1, {forwarded}\r\n"
+                f"Content-Type: application/json\r\n"
+                f"Content-Length: {len(body)}\r\n\r\n").encode() + body
+            with socket.create_connection(("127.0.0.1", self.app.port), 15) as sock:
+                sock.sendall(request)
+                return int(sock.recv(64).split()[1])
+
+        for _ in range(2):
+            self.assertEqual(await asyncio.to_thread(hello, "198.51.100.4"), 200)
+        self.assertEqual(await asyncio.to_thread(hello, "198.51.100.4"), 429)
+        # a different visitor, arriving through the same proxy, is unaffected
+        self.assertEqual(await asyncio.to_thread(hello, "198.51.100.9"), 200)
+
+    async def test_healthz_reports_liveness_without_leaking_the_books(self):
+        status, body = await asyncio.to_thread(_get, self.base + "/healthz")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+        self.assertIn("-", body["node"])
+        self.assertGreaterEqual(body["uptime"], 0.0)
+        self.assertIn("peers", body)
+        for secret in ("balance", "admin", "token"):
+            self.assertNotIn(secret, body)
+
+    async def test_every_response_carries_the_security_headers(self):
+        def _headers():
+            with urllib.request.urlopen(self.base + "/", timeout=15) as r:
+                return {k.lower(): v for k, v in r.getheaders()}
+
+        headers = await asyncio.to_thread(_headers)
+        self.assertEqual(headers["x-content-type-options"], "nosniff")
+        self.assertEqual(headers["x-frame-options"], "DENY")
+        self.assertIn("frame-ancestors 'none'", headers["content-security-policy"])
+        self.assertIn("connect-src 'self'", headers["content-security-policy"])
 
 
 class OperatorConsoleTests(unittest.IsolatedAsyncioTestCase):

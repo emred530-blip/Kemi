@@ -1,0 +1,47 @@
+[Unit]
+Description=Kemi peer node (provides compute to the network)
+Documentation=https://github.com/emred530-blip/kemi/blob/main/DEPLOY.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=kemi
+Group=kemi
+EnvironmentFile=/etc/kemi/kemi.env
+Environment=KEMI_HOME=/var/lib/kemi/node
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/kemi/bin/kemi-launch node
+Restart=always
+RestartSec=5
+# A cold start mines the identity's proof of work and may pull a model.
+TimeoutStartSec=300
+
+# --- confinement ---------------------------------------------------------
+# This process runs work submitted by strangers. Kemi already sandboxes each
+# task in a resource-limited subprocess; systemd is the second wall behind it.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ReadWritePaths=/var/lib/kemi/node
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

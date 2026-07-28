@@ -115,11 +115,25 @@ açabilir; harcamaları o portalı işleten düğüm karşılar.
 Kalıcılık: misafir cüzdanları `~/.kemi/portal.json` dosyasında saklanır;
 portal yeniden başlatılsa da bakiye ve sohbet geçmişi korunur.
 
+## 5b. Kendi alan adınızda yayına alma
+
+Yukarıdaki komutlar portalı çalıştırır; kalıcı, TLS'li ve yeniden başlatmaya
+dayanıklı bir kurulum için tek komut yeter:
+
+```sh
+sudo ./deploy/install-server.sh --domain alanadiniz.com --tls --email siz@ornek.com
+```
+
+Ayrıcalıksız bir sistem kullanıcısı, üç systemd servisi (düğüm, portal, geçit),
+nginx ters vekil sunucusu ve Let's Encrypt sertifikası kurulur; yönetici
+anahtarı üretilip ekrana yazılır. Ayrıntılar, güvenlik notları, yedekleme ve
+kaldırma adımları için **[DEPLOY.md](DEPLOY.md)**.
+
 ## 6. Yayınlama (isteğe bağlı)
 
 - **GitHub:** `claude/p2p-compute-sharing-wnbm1l` dalını `main`'e birleştirip
   depoyu herkese açık yapın.
-- **Sürüm:** `git tag v1.11.0 && git push origin v1.11.0` — CI, üç işletim
+- **Sürüm:** `git tag v1.12.0 && git push origin v1.12.0` — CI, üç işletim
   sistemi için tek-dosya uygulamaları derleyip GitHub Release'e ekler
   (`.github/workflows/apps.yml`); PyPI için `RELEASE.md`'deki güvenilir
   yayıncı adımlarını izleyin. Sonrasında kurulum tek satırdır:
@@ -138,5 +152,6 @@ portal yeniden başlatılsa da bakiye ve sohbet geçmişi korunur.
 with `kemi app`, join from other machines with `kemi join` (LAN auto-discovery
 or `kemi1-…` invite codes), expose an always-on bootstrap node by opening
 7700/tcp+udp and running `kemi service` (add `--dry-run` to preview the unit), bridge OpenAI-compatible
-tools via `kemi serve` (port 11434), and publish by tagging `v1.11.0` so CI
-builds the desktop apps.
+tools via `kemi serve` (port 11434), and publish by tagging `v1.12.0` so CI
+builds the desktop apps. To put the portal on your own domain with TLS in one
+command, see **[DEPLOY.md](DEPLOY.md)**.

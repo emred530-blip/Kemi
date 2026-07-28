@@ -315,11 +315,13 @@ async def _cmd_web(args: argparse.Namespace) -> int:
     state_path = os.path.join(KEMI_HOME, "portal.json")
     app = WebApp(node, host=args.web_host, port=args.web_port,
                  faucet=args.faucet, state_path=state_path,
-                 admin_key=args.admin_key)
+                 admin_key=args.admin_key, trust_proxy=args.trust_proxy,
+                 guests_per_ip=args.guests_per_ip)
     await app.start()
     print(BANNER)
-    print(f"Access portal:   http://{args.web_host}:{app.port}/")
+    print(f"Access portal:    http://{args.web_host}:{app.port}/")
     print(f"Operator console: http://{args.web_host}:{app.port}/admin")
+    print(f"Health check:     http://{args.web_host}:{app.port}/healthz")
     print(f"Admin key:        {app.admin_key}   (store securely)")
     print(f"  Each new visitor receives {args.faucet:g} starting credits. Their queries")
     print("  are processed by provider nodes and settled from this node's balance.")
@@ -738,6 +740,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="starting credits per new visitor (funded by this node)")
     p.add_argument("--admin-key", default=None,
                    help="operator console key (default: generated and printed)")
+    p.add_argument("--trust-proxy", action="store_true",
+                   help="read the visitor's address from X-Forwarded-For / "
+                        "X-Real-IP; set this only when a reverse proxy you "
+                        "control is the only way in")
+    p.add_argument("--guests-per-ip", type=int, default=5,
+                   help="starting allowances one address may claim per hour "
+                        "(0 disables the cap)")
     p.add_argument("--provide", action="store_true",
                    help="also share this machine's compute with the fleet")
     p.add_argument("--price", type=float, default=1.0)

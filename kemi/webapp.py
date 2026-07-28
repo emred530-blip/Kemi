@@ -15,6 +15,7 @@ there can be as many portals as there are operators willing to fund one.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import logging
@@ -37,10 +38,40 @@ MAX_LOG = 60                 # chat entries kept per guest
 ASK_COOLDOWN = 2.0           # seconds between questions per guest
 MAX_CONCURRENT_CHATS = 4     # fleet-bound questions in flight, harbor-wide
 ASKS_KEPT = 400              # answered-question records kept for the admin panel
+MAX_HEADERS = 64             # request headers accepted before the request is dropped
+NEW_GUESTS_PER_IP = 5        # starting allowances one address may claim per window
+NEW_GUEST_WINDOW = 3600.0    # seconds
+
+# Sent on every response. The portal is self-contained — its markup, styles and
+# scripts are inline and it talks to nothing but its own origin — so the policy
+# can be this tight without breaking a single feature.
+SECURITY_HEADERS = (
+    "X-Content-Type-Options: nosniff\r\n"
+    "X-Frame-Options: DENY\r\n"
+    "Referrer-Policy: no-referrer\r\n"
+    "Content-Security-Policy: default-src 'none'; img-src 'self' data:; "
+    "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+    "connect-src 'self'; form-action 'self'; base-uri 'none'; "
+    "frame-ancestors 'none'\r\n"
+)
 
 
 def _now() -> float:
     return time.time()
+
+
+def _origin_tag(ip: str) -> str:
+    """A short, stable, one-way tag for a client address.
+
+    The operator console needs to see that six accounts came from one place;
+    it does not need to see where that place is. Only the tag is ever stored
+    or displayed — the address itself stays in memory, for rate limiting.
+    """
+    return hashlib.sha256(ip.encode("utf-8")).hexdigest()[:8]
+
+
+class RateLimited(PermissionError):
+    """A client asked for more than its share. Answered with 429."""
 
 
 class WebApp:
@@ -48,7 +79,8 @@ class WebApp:
 
     def __init__(self, node, host: str = "0.0.0.0", port: int = 8090,
                  faucet: float = 10.0, state_path: str | None = None,
-                 admin_key: str | None = None):
+                 admin_key: str | None = None, trust_proxy: bool = False,
+                 guests_per_ip: int = NEW_GUESTS_PER_IP):
         self.node = node
         self.consumer = Consumer(node)
         self.host = host
@@ -56,7 +88,11 @@ class WebApp:
         self.faucet = float(faucet)
         self.state_path = state_path
         self.admin_key = admin_key or secrets.token_urlsafe(12)
+        self.trust_proxy = bool(trust_proxy)
+        self.guests_per_ip = max(0, int(guests_per_ip))
+        self.started = _now()
         self._guests: dict[str, dict[str, Any]] = {}
+        self._mints: dict[str, deque[float]] = {}
         self._asks: deque[dict[str, Any]] = deque(maxlen=ASKS_KEPT)
         self._server: asyncio.Server | None = None
         self._chat_slots = asyncio.Semaphore(MAX_CONCURRENT_CHATS)
@@ -120,6 +156,7 @@ class WebApp:
                     "spent": float(g.get("spent", 0.0)),
                     "asks": int(g.get("asks", 0)),
                     "banned": bool(g.get("banned", False)),
+                    "origin": str(g.get("origin", "")),
                     "log": list(g.get("log", []))[-MAX_LOG:],
                     "history": [tuple(x) for x in g.get("history", [])][-8:],
                     "live": "", "busy": False, "last_ask": 0.0,
@@ -136,8 +173,8 @@ class WebApp:
         durable = {}
         for token, g in self._guests.items():
             durable[token] = {k: g[k] for k in
-                              ("name", "balance", "created", "seen",
-                               "spent", "asks", "banned", "log", "history")}
+                              ("name", "balance", "created", "seen", "spent",
+                               "asks", "banned", "origin", "log", "history")}
         tmp = f"{self.state_path}.tmp"
         try:
             os.makedirs(os.path.dirname(self.state_path) or ".", exist_ok=True)
@@ -153,13 +190,36 @@ class WebApp:
             idle = min(self._guests.values(), key=lambda g: g["seen"])
             del self._guests[idle["token"]]
 
-    def _guest(self, token: str | None) -> dict[str, Any]:
+    def _claim_allowance(self, ip: str) -> None:
+        """Rate-limit the minting of new funded accounts per client address.
+
+        The starting allowance is real money out of the operator's balance, and
+        a token is whatever the browser says it is — so without this one script
+        could drain a portal by simply asking for a new session in a loop.
+        """
+        recent = self._mints.setdefault(ip, deque())
+        cutoff = _now() - NEW_GUEST_WINDOW
+        while recent and recent[0] < cutoff:
+            recent.popleft()
+        if len(recent) >= self.guests_per_ip:
+            raise RateLimited(
+                "this address has opened too many sessions recently; "
+                "please try again later")
+        recent.append(_now())
+        if len(self._mints) > MAX_GUESTS:      # forget addresses gone quiet
+            for stale in [k for k, v in self._mints.items()
+                          if not v or v[-1] < cutoff]:
+                del self._mints[stale]
+
+    def _guest(self, token: str | None, ip: str = "") -> dict[str, Any]:
         """Resume a visitor by token, or register a new one with the
         starting allowance."""
         if token and token in self._guests:
             guest = self._guests[token]
             guest["seen"] = _now()
             return guest
+        if ip and self.faucet > 0 and self.guests_per_ip:
+            self._claim_allowance(ip)
         token = secrets.token_urlsafe(18)
         guest = {
             "token": token,
@@ -167,6 +227,7 @@ class WebApp:
             "balance": self.faucet,
             "created": _now(), "seen": _now(),
             "spent": 0.0, "asks": 0, "banned": False,
+            "origin": _origin_tag(ip) if ip else "",
             "log": [], "history": [],
             "live": "", "busy": False, "last_ask": 0.0,
         }
@@ -267,6 +328,23 @@ class WebApp:
             "fleet": self._fleet_summary(),
         }
 
+    # -- liveness -------------------------------------------------------------
+
+    def health(self) -> dict[str, Any]:
+        """What a load balancer, a systemd watchdog or an uptime check needs —
+        and nothing an anonymous caller has no business seeing."""
+        from . import __version__
+
+        return {
+            "ok": True,
+            "node": ship_name(self.node.identity.node_id),
+            "version": __version__,
+            "uptime": round(_now() - self.started, 1),
+            "providers": len(self._providers_cache),
+            "peers": len(self.node.dht.table),
+            "visitors": len(self._guests),
+        }
+
     # -- the operator console -------------------------------------------------
 
     def _check_admin(self, key: str) -> None:
@@ -330,8 +408,23 @@ class WebApp:
             "token": g["token"], "name": g["name"],
             "balance": round(g["balance"], 2), "spent": round(g["spent"], 2),
             "asks": g["asks"], "banned": g["banned"],
+            "origin": g.get("origin", ""),
             "seen": round(now - g["seen"]),
         } for g in sorted(self._guests.values(), key=lambda g: -g["seen"])[:200]]
+
+        # accounts sharing an origin tag came from one address: the shape
+        # credit farming takes once the per-address cap is worked around.
+        origins: dict[str, int] = {}
+        for g in self._guests.values():
+            if g.get("origin"):
+                origins[g["origin"]] = origins.get(g["origin"], 0) + 1
+        crowded = sorted((c, o) for o, c in origins.items()
+                         if c >= max(2, self.guests_per_ip))
+        if crowded:
+            worst = crowded[-1]
+            alerts.append({"level": "warning",
+                           "text": f"Tek bir adresten {worst[0]} hesap açılmış "
+                                   f"(köken {worst[1]}). Kredi çiftçiliği olabilir."})
 
         return {
             "ship": ship_name(node.identity.node_id),
@@ -385,6 +478,26 @@ class WebApp:
 
     # -- HTTP plumbing -------------------------------------------------------
 
+    def _client_ip(self, writer: asyncio.StreamWriter,
+                   headers: dict[str, str]) -> str:
+        """The address to hold accountable for this request.
+
+        Behind a reverse proxy the socket peer is always the proxy, so the real
+        client has to come from a forwarding header — which is client-writable
+        and therefore only consulted when the operator has said, with
+        ``--trust-proxy``, that a proxy they control sits in front. The
+        rightmost ``X-Forwarded-For`` entry is the one that proxy appended
+        itself; anything a client forged sits to the left of it and is ignored.
+        """
+        if self.trust_proxy:
+            forwarded = headers.get("x-forwarded-for", "")
+            if forwarded:
+                return forwarded.rsplit(",", 1)[-1].strip()
+            if headers.get("x-real-ip"):
+                return headers["x-real-ip"].strip()
+        peer = writer.get_extra_info("peername")
+        return str(peer[0]) if peer else ""
+
     async def _handle(self, reader: asyncio.StreamReader,
                       writer: asyncio.StreamWriter) -> None:
         try:
@@ -393,19 +506,23 @@ class WebApp:
             if len(parts) < 2:
                 raise ValueError("bad request line")
             method, path = parts[0], parts[1]
-            content_length = 0
-            while True:
+            headers: dict[str, str] = {}
+            for _ in range(MAX_HEADERS):
                 header = await asyncio.wait_for(reader.readline(), timeout=15.0)
                 if header in (b"\r\n", b"\n", b""):
                     break
                 name, _, value = header.decode("latin-1").partition(":")
-                if name.strip().lower() == "content-length":
-                    content_length = min(int(value.strip()), MAX_BODY + 1)
+                headers[name.strip().lower()] = value.strip()
+            else:
+                raise ValueError("too many headers")
+            content_length = min(int(headers.get("content-length") or 0),
+                                 MAX_BODY + 1)
             body = await reader.readexactly(content_length) if content_length else b""
             if content_length > MAX_BODY:
                 await self._respond(writer, 413, {"error": "body too large"})
                 return
-            await self._route(writer, method, path, body)
+            await self._route(writer, method, path, body,
+                              self._client_ip(writer, headers))
         except (asyncio.TimeoutError, asyncio.IncompleteReadError,
                 ConnectionError, ValueError, OSError):
             pass
@@ -415,7 +532,7 @@ class WebApp:
             writer.close()
 
     async def _route(self, writer: asyncio.StreamWriter, method: str,
-                     path: str, body: bytes) -> None:
+                     path: str, body: bytes, ip: str = "") -> None:
         path, _, query = path.partition("?")
         params = dict(p.partition("=")[::2] for p in query.split("&") if p)
         token = params.get("t", "")
@@ -425,7 +542,7 @@ class WebApp:
                                     content_type="text/html; charset=utf-8")
             elif method == "POST" and path == "/api/hello":
                 spec = json.loads(body.decode("utf-8") or "{}")
-                guest = self._guest(str(spec.get("token") or "") or None)
+                guest = self._guest(str(spec.get("token") or "") or None, ip)
                 await self._respond(writer, 200, {
                     "ok": True, "token": guest["token"], "name": guest["name"],
                     "balance": round(guest["balance"], 4),
@@ -439,6 +556,8 @@ class WebApp:
                 await self._respond(writer, 200, result)
             elif method == "GET" and path == "/api/chat":
                 await self._respond(writer, 200, self.chat_state(token))
+            elif method == "GET" and path == "/healthz":
+                await self._respond(writer, 200, self.health())
             elif method == "GET" and path == "/admin":
                 await self._respond(writer, 200, _ADMIN,
                                     content_type="text/html; charset=utf-8")
@@ -458,6 +577,8 @@ class WebApp:
                                     self.admin_set_faucet(spec.get("amount")))
             else:
                 await self._respond(writer, 404, {"error": "not found"})
+        except RateLimited as exc:
+            await self._respond(writer, 429, {"ok": False, "error": str(exc)})
         except PermissionError as exc:
             await self._respond(writer, 401, {"ok": False, "error": str(exc)})
         except (ValueError, json.JSONDecodeError, TypeError) as exc:
@@ -471,10 +592,12 @@ class WebApp:
         else:
             data = payload.encode("utf-8") if isinstance(payload, str) else payload
         reason = {200: "OK", 400: "Bad Request", 401: "Unauthorized",
-                  404: "Not Found", 413: "Payload Too Large"}.get(status, "OK")
+                  404: "Not Found", 413: "Payload Too Large",
+                  429: "Too Many Requests"}.get(status, "OK")
         head = (f"HTTP/1.1 {status} {reason}\r\n"
                 f"Content-Type: {content_type}\r\n"
                 f"Content-Length: {len(data)}\r\n"
+                + SECURITY_HEADERS +
                 "Cache-Control: no-store\r\nConnection: close\r\n\r\n")
         try:
             writer.write(head.encode("latin-1") + data)
@@ -1040,21 +1163,32 @@ function chart(series) {
 }
 
 function guests(rows) {
+  // accounts opened from the same address share an origin tag; several of them
+  // together is what credit farming looks like from the operator's seat.
+  const seen = {};
+  rows.forEach(g => { if (g.origin) seen[g.origin] = (seen[g.origin] || 0) + 1; });
+  const origin = (g) => {
+    if (!g.origin) return '<span class="muted">—</span>';
+    const n = seen[g.origin] || 1;
+    return n > 2 ? `<span class="pill warn" title="bu adresten ${n} hesap">▲ ${esc(g.origin)} ×${n}</span>`
+                 : `<span class="muted">${esc(g.origin)}</span>`;
+  };
   const body = rows.length ? rows.map(g => `<tr>
     <td>${esc(g.name)} ${g.banned ? '<span class="pill bad">× engelli</span>' : ''}</td>
     <td class="num">${g.balance.toFixed(2)}</td>
     <td class="num">${g.spent.toFixed(2)}</td>
     <td class="num">${g.asks}</td>
+    <td>${origin(g)}</td>
     <td class="muted">${ago(g.seen)} önce</td>
     <td style="white-space:nowrap">
       <button class="ghost ok" data-act="gift" data-t="${esc(g.token)}">+5 kredi</button>
       <button class="ghost" data-act="${g.banned ? 'unban' : 'ban'}"
         data-t="${esc(g.token)}">${g.banned ? 'engeli kaldır' : 'engelle'}</button>
     </td></tr>`).join('')
-    : `<tr><td colspan="6" class="muted">henüz kullanıcı yok — portal adresini paylaşın</td></tr>`;
+    : `<tr><td colspan="7" class="muted">henüz kullanıcı yok — portal adresini paylaşın</td></tr>`;
   return `<section><h2>kullanıcılar</h2><table>
     <thead><tr><th>kullanıcı</th><th>bakiye</th><th>harcama</th><th>sorgu</th>
-    <th>son etkinlik</th><th>işlem</th></tr></thead>
+    <th>köken</th><th>son etkinlik</th><th>işlem</th></tr></thead>
     <tbody>${body}</tbody></table></section>`;
 }
 

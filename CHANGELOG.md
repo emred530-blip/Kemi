@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.12.0 — Public deployment
+Everything needed to put Kemi on the open internet under your own domain,
+and the controls a portal needs once strangers can reach it.
+
+- **`deploy/`**: `install-server.sh` turns a fresh Debian/Ubuntu box into a
+  running deployment — an unprivileged `kemi` user, a virtualenv at
+  `/opt/kemi/venv`, three systemd units (peer node, access portal, OpenAI
+  gateway) each with its own state directory, an nginx site and a Let's
+  Encrypt certificate. Re-running it upgrades the code and units without
+  touching settings or an identity that already holds a balance.
+- **Confinement**: the units run unprivileged under `ProtectSystem=strict`
+  with a syscall filter and one writable path each. The node runs work
+  submitted by strangers, so systemd sits behind Kemi's own task sandbox
+  rather than replacing it.
+- **The faucet cannot be farmed**: starting credits are the operator's
+  money and a session token is whatever the browser claims, so new funded
+  accounts are now rate-limited per client address (`--guests-per-ip`,
+  default 5/hour) and refused with `429`. Visitors already holding a token
+  are never turned away.
+- **`--trust-proxy`**: behind a reverse proxy the portal reads the visitor's
+  address from the rightmost `X-Forwarded-For` entry — the one the proxy
+  appends itself — so a forged header cannot shift the blame. Off by
+  default; the shipped unit binds the portal to loopback before enabling it.
+- **Origin tags**: accounts opened from one address share a one-way
+  eight-character tag in the operator console, and the console raises an
+  alert when one origin gets crowded. The address itself is never stored.
+- **Security headers** on every portal response: `nosniff`, `DENY` framing,
+  no referrer, and a content policy that permits nothing but its own origin.
+- **`GET /healthz`**: liveness for supervisors and uptime checks — node
+  name, version, uptime, peer and provider counts, and nothing else.
+- **DEPLOY.md** covers the whole path: firewall, install, settings,
+  verification, what is defended and how, backup and removal.
+
 ## 1.11.1 — One-command stack
 - `scripts/start-stack.sh` brings up a complete deployment — bootstrap node,
   provider node with dashboard, public access portal with its operator
